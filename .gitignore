@@ -49,8 +49,38 @@ tmp/
 Thumbs.db
 *.DS_Store
 
-asl_alphabet_test/
-asl_alphabet_train/
-asl_test_organized/
-combined_training/
-custom_dataset/
+# Model checkpoints and outputs
+outputs/models/*.pth
+outputs/models/*.onnx
+outputs/models/*.onnx.data
+
+# Metrics and generated artifacts
+outputs/metrics/**/*.png
+outputs/metrics/**/*.pdf
+outputs/metrics/**/*.html
+outputs/metrics/**/*.jpg
+
+# Dataset artifacts (large)
+datasets/**/*.jpg
+datasets/**/*.jpeg
+datasets/**/*.png
+datasets/**/*.bmp
+!datasets/.gitignore
+
+# Environment files
+.env
+.venv/
+env/
+
+# IDE settings
+.vscode/
+.idea/
+
+# Jupyter notebook outputs
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Logs
+*.log
+
+datasets/
