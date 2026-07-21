@@ -1,0 +1,56 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+test/__pycache__/
+test/*.py[cod]
+test/*$py.class
+
+# Distribution / packaging
+.Python
+dist/
+bld/
+wheelhouse/
+sdist/
+build-info/
+egg-info/
+.eggs/
+.installed.cfg
+*.egg-info/
+MANIFEST
+PKG-INFO
+
+# Virtual Environment
+.venv/
+venv/
+.env/
+env/
+virtualenv/
+.cache/pypoetry/virtualenvs/
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# Logs
+logs/
+log/
+
+# Data files
+data/
+temp/
+tmp/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# OS generated files
+Thumbs.db
+*.DS_Store
+
+asl_alphabet_test/
+asl_alphabet_train/
+asl_test_organized/
+combined_training/
+custom_dataset/
