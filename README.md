@@ -16,6 +16,8 @@ Webcam → Hand Detection (MediaPipe) → ROI Crop → CNN Inference → Tempora
 
 ## Quick Start
 
+### Local Inference (Python)
+
 ```bash
 # Install dependencies
 pip install -r requirements.txt
@@ -30,6 +32,19 @@ python asl_pytorch_inference.py --simple
 python src/scripts/capture_asl_images.py
 ```
 
+### Web App (Docker)
+
+```bash
+# Generate model weights (replaces Git LFS pointers)
+.venv/bin/python generate_models.py
+
+# Start stack — frontend at http://localhost
+docker compose up -d
+
+# Stop
+docker compose down
+```
+
 ## Models
 
 | Model | Parameters | Use Case |
@@ -39,7 +54,11 @@ python src/scripts/capture_asl_images.py
 | EfficientNet-B0 | ~5M | Lightweight alternative |
 | Custom CNN | ~1M | Minimal footprint |
 
-Switch models by updating `MODEL_TYPE` and `MODEL_PATH` in `src/inference/__init__.py`.
+Switch models by updating `MODEL_TYPE` in `src/config/settings.py` or via env var:
+
+```bash
+MODEL_TYPE=resnet50 docker compose up -d
+```
 
 ## Configuration
 
@@ -64,21 +83,46 @@ All tunable parameters live in `src/config/settings.py`:
 | S | Save screenshot |
 | R | Reset prediction history |
 
+## Web App Architecture
+
+The web deployment splits the pipeline between browser and server:
+
+| Client (Browser) | Server (API) |
+|-----------------|--------------|
+| Camera capture (`getUserMedia`) | Image preprocessing |
+| Hand detection (MediaPipe Hands JS) | CNN inference (PyTorch) |
+| ROI crop (canvas) | Temporal smoothing |
+| DOM rendering | Sentence accumulation |
+| | WebSocket streaming |
+
+API endpoints: `/api/predict`, `/api/update`, `/api/sentence/*`, `/api/stream` (WebSocket).
+See [`docs/AGENTS.md`](docs/AGENTS.md) for full endpoint reference.
+
 ## Project Structure
 
 ```
 ├── src/
-│   ├── config/          # Centralized settings
-│   ├── inference/       # Inference pipeline
+│   ├── config/          # Centralized settings (env var overrides)
+│   ├── inference/       # Local inference pipeline
 │   ├── scripts/         # Capture and utility scripts
-│   └── data/            # Data utilities
+├── api/                 # Web API service (FastAPI)
+│   ├── main.py          # FastAPI endpoints + WebSocket
+│   ├── models.py        # Pydantic schemas
+│   └── services/        # ImagePreprocessor, ASLPredictor, ModelRegistry, etc.
+├── frontend/            # Browser client (MediaPipe JS + vanilla JS)
+│   ├── index.html       # Main page
+│   ├── css/             # Dark theme styling
+│   └── js/              # MediaPipe integration, sentence manager
 ├── notebooks/           # Training notebooks
 ├── datasets/            # Training data
 ├── outputs/
 │   ├── models/          # Trained model checkpoints
 │   └── metrics/         # Training metrics
 ├── docs/                # Architecture documentation
-└── requirements.txt
+├── generate_models.py   # Generate model weights from LFS pointers
+├── docker-compose.yml   # Service orchestration
+├── test_webapp.py       # 115 unit/integration tests
+└── test_edge_cases.py   # 37 edge case tests
 ```
 
 ## Architecture
@@ -100,5 +144,4 @@ See [`docs/`](docs/) for detailed documentation:
 
 - Two-handed sign recognition (J, Z, numbers)
 - Continuous gesture sequences beyond single letters
-- Web deployment via containerized API
-- Mobile deployment
+- Mobile deployment (TFLite/CoreML)
