@@ -1,42 +1,5 @@
-Aptitude-based Admissions (ABA) take into account students' passions, interests and strengths. Applicants with exceptional talents and/or outstanding achievements beyond schools' co-curricular activities can be considered, subject to a minimum level of academic competence, for admissions under ABA. Academic grades of relevant subjects may be an indication of aptitude as well. Please let us know if you have any other talents or achievements besides your academic results that you would like us to consider in your application for this admission exercise.
-
-
-Supporting Documents: All related information provided in this section may be required for submission for verification purpose.
-Activity 1 to 3: To provide all other achievements/participations/ involvements details (within the last 5 years only) in the area of arts & culture, community work, leadership, entrepreneurship, sports, etc. in Merit order of THE MOST OUTSTANDING ACHIEVEMENTS/TALENTS indicated FIRST.
-
-SECTION A
-Activity 1
-Participation/Representation Level - Not applicable/International/National
-Type - Leadership/Arts & Culture/Community Service/Sustainability/Sporting Professional/Others
-Major Activity/Event/Competition - e.g. SEA Games, International Olympiad, Tan Kah Kee Young Inventors' Award, etc
-Position Held - e.g. President, Captain, etc. Indicate 'NA' if not applicable.
-From (within the last 5 years only) - MMM-YYYY, e.g.FEB-2025
-To (within the last 5 years only) - MMM-YYYY, e.g.AUG-2025
-List awards/certificates received. Help us understand the impact of the listed activity/achievement. How does the above achievement/active participation demonstrate your commitment, skill and interests? (no more than 150 words)
-
-Activity 2
-Participation/Representation Level - Not applicable/International/National
-Type - Leadership/Arts & Culture/Community Service/Sustainability/Sporting Professional/Others
-Major Activity/Event/Competition - e.g. SEA Games, International Olympiad, Tan Kah Kee Young Inventors' Award, etc
-Position Held - e.g. President, Captain, etc. Indicate 'NA' if not applicable.
-From (within the last 5 years only) - MMM-YYYY, e.g.FEB-2025
-To (within the last 5 years only) - MMM-YYYY, e.g.AUG-2025
-List awards/certificates received. Help us understand the impact of the listed activity/achievement. How does the above achievement/active participation demonstrate your commitment, skill and interests? (no more than 150 words)
-
-Activity 3
-Participation/Representation Level - Not applicable/International/National
-Type - Leadership/Arts & Culture/Community Service/Sustainability/Sporting Professional/Others
-Major Activity/Event/Competition - e.g. SEA Games, International Olympiad, Tan Kah Kee Young Inventors' Award, etc
-Position Held - e.g. President, Captain, etc. Indicate 'NA' if not applicable.
-From (within the last 5 years only) - MMM-YYYY, e.g.FEB-2025
-To (within the last 5 years only) - MMM-YYYY, e.g.AUG-2025
-List awards/certificates received. Help us understand the impact of the listed activity/achievement. How does the above achievement/active participation demonstrate your commitment, skill and interests? (no more than 150 words)
-
-SECTION B
-As part of the application to be considered under Aptitude-Based Admissions (ABA), we would like to get to know you better through the following questions. Please provide a simple and straight to the point responses.
-
-How have your passion, and/or relevant experiences prepared you to be a strong fit for your choice programme? (not more than 200 words)
-
-Can you share specific examples of challenges you have overcome that demonstrate/highlight your tenacity? (not more than 200 words)
-
-What is your long-term vision for advancing your chosen field, and what key contributions do you plan to make to turn that vision into reality? (not more than 200 words)
+torch
+torchvision
+opencv-python
+mediapipe
+numpy
