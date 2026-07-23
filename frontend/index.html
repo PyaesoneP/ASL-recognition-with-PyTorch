@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASL Recognition</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1>ASL Recognition</h1>
+            <div class="status-indicator" id="statusIndicator">
+                <span class="status-dot"></span>
+                <span class="status-text">Initializing...</span>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div class="video-section">
+                <div class="video-container">
+                    <video id="video" playsinline autoplay></video>
+                    <canvas id="overlay"></canvas>
+                    <div class="roi-box" id="roiBox"></div>
+                </div>
+                <div class="prediction-display">
+                    <div class="prediction-label" id="predictionLabel">No gesture</div>
+                    <div class="confidence-bar" id="confidenceBar">
+                        <div class="confidence-fill" id="confidenceFill"></div>
+                    </div>
+                    <div class="confidence-value" id="confidenceValue">0%</div>
+                </div>
+            </div>
+
+            <div class="sentence-section">
+                <div class="sentence-header">
+                    <span>Sentence</span>
+                    <div class="sentence-controls">
+                        <button class="ctrl-btn" id="btnSpace" title="Space">Space</button>
+                        <button class="ctrl-btn" id="btnDel" title="Backspace">Del</button>
+                        <button class="ctrl-btn danger" id="btnClear" title="Clear all">Clear</button>
+                    </div>
+                </div>
+                <div class="sentence-box" id="sentenceBox">Start signing to build a sentence...</div>
+                <div class="keyboard-hints">
+                    <kbd>Space</kbd> add space &nbsp;
+                    <kbd>Backspace</kbd> delete last &nbsp;
+                    <kbd>C</kbd> clear all
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="js/sentence.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
