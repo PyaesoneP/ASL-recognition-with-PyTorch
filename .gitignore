@@ -84,3 +84,8 @@ env/
 *.log
 
 datasets/
+
+# Local dev artifacts — never commit (TLS keys, downloaded models, debug images)
+outputs/certs/
+outputs/mp/
+outputs/*.png
