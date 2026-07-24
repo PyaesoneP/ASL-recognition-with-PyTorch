@@ -1,0 +1,14 @@
+# Render Blueprint
+services:
+  - type: web
+    name: asl-recognition-backend
+    env: docker
+    plan: free
+    region: eu.oregon.us
+    env_vars:
+      - key: MODEL_TYPE
+        value: mobilenet_v2
+      - key: MODEL_PATH
+        value: outputs/models/best_mobilenet_v2.onnx
+      - key: PYTHONUNBUFFERED
+        value: "1"
