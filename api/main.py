@@ -57,7 +57,7 @@ app.add_middleware(
 )
 
 # Serve frontend static files (for single-container deployment on Render)
-_frontend_path = Path(__file__).resolve().parents[2] / "frontend"
+_frontend_path = Path(__file__).resolve().parents[1] / "frontend"
 if _frontend_path.exists():
     app.mount("/", StaticFiles(directory=str(_frontend_path), html=True), name="frontend")
 
