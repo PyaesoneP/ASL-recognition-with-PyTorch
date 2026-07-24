@@ -18,8 +18,6 @@ from collections import deque
 from typing import Optional, Tuple
 import numpy as np
 import onnxruntime as ort
-import torch
-import torch.nn as nn
 from PIL import Image
 import cv2
 
@@ -67,73 +65,80 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 # CustomCNN — lightweight 4-block CNN (trained from scratch)
 # ---------------------------------------------------------------------------
 
-class CustomCNN(nn.Module):
-    """Custom CNN architecture (must match training!).
+try:
+    import torch
+    import torch.nn as nn
 
-    4 convolutional blocks (32->64->128->256 filters) with batch norm,
-    ReLU, max pooling, and dropout. Global average pooling followed by
-    a 3-layer classifier (256->512->256->num_classes).
-    """
+    class CustomCNN(nn.Module):
+        """Custom CNN architecture (must match training!).
 
-    def __init__(self, num_classes=NUM_CLASSES):
-        super().__init__()
+        4 convolutional blocks (32->64->128->256 filters) with batch norm,
+        ReLU, max pooling, and dropout. Global average pooling followed by
+        a 3-layer classifier (256->512->256->num_classes).
+        """
 
-        self.conv_blocks = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(0.25),
+        def __init__(self, num_classes=NUM_CLASSES):
+            super().__init__()
 
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(0.25),
+            self.conv_blocks = nn.Sequential(
+                nn.Conv2d(3, 32, kernel_size=3, padding=1),
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(32, 32, kernel_size=3, padding=1),
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(2, 2),
+                nn.Dropout2d(0.25),
 
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(128, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(0.25),
+                nn.Conv2d(32, 64, kernel_size=3, padding=1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(64, 64, kernel_size=3, padding=1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(2, 2),
+                nn.Dropout2d(0.25),
 
-            nn.Conv2d(128, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(256, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(0.25),
-        )
+                nn.Conv2d(64, 128, kernel_size=3, padding=1),
+                nn.BatchNorm2d(128),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(128, 128, kernel_size=3, padding=1),
+                nn.BatchNorm2d(128),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(2, 2),
+                nn.Dropout2d(0.25),
 
-        self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
+                nn.Conv2d(128, 256, kernel_size=3, padding=1),
+                nn.BatchNorm2d(256),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(256, 256, kernel_size=3, padding=1),
+                nn.BatchNorm2d(256),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(2, 2),
+                nn.Dropout2d(0.25),
+            )
 
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(256, 512),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.5),
-            nn.Linear(512, 256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.5),
-            nn.Linear(256, num_classes),
-        )
+            self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
 
-    def forward(self, x):
-        x = self.conv_blocks(x)
-        x = self.global_pool(x)
-        x = self.classifier(x)
-        return x
+            self.classifier = nn.Sequential(
+                nn.Flatten(),
+                nn.Linear(256, 512),
+                nn.ReLU(inplace=True),
+                nn.Dropout(0.5),
+                nn.Linear(512, 256),
+                nn.ReLU(inplace=True),
+                nn.Dropout(0.5),
+                nn.Linear(256, num_classes),
+            )
+
+        def forward(self, x):
+            x = self.conv_blocks(x)
+            x = self.global_pool(x)
+            x = self.classifier(x)
+            return x
+
+except ImportError:
+    CustomCNN = None  # type: ignore[misc,assignment]
 
 # ---------------------------------------------------------------------------
 # Inference Engine (ONNX Runtime)
@@ -435,11 +440,15 @@ def _register_efficientnet_b0(num_classes: int = NUM_CLASSES):
     return model
 
 
-# Register all four model backbones
-ModelRegistry.register("mobilenet_v2", _register_mobilenet_v2)
-ModelRegistry.register("resnet50", _register_resnet50)
-ModelRegistry.register("efficientnet_b0", _register_efficientnet_b0)
-ModelRegistry.register("custom_cnn", lambda num_classes=NUM_CLASSES: CustomCNN(num_classes))
+# Register all four model backbones (only if torch/torchvision available)
+try:
+    ModelRegistry.register("mobilenet_v2", _register_mobilenet_v2)
+    ModelRegistry.register("resnet50", _register_resnet50)
+    ModelRegistry.register("efficientnet_b0", _register_efficientnet_b0)
+    if CustomCNN is not None:
+        ModelRegistry.register("custom_cnn", lambda num_classes=NUM_CLASSES: CustomCNN(num_classes))
+except (ImportError, NameError):
+    pass  # PyTorch-based models unavailable; ONNX inference still works
 
 
 # ---------------------------------------------------------------------------
