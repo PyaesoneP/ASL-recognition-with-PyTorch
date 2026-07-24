@@ -38,7 +38,7 @@ Use **PyTorch** as the primary deep learning framework.
 - ONNX export required for cross-platform inference optimization
 - Larger community around TensorFlow for enterprise MLOps tooling
 
-**Mitigation**: ONNX export path planned for web deployment phase; TorchScript available as alternative.
+**Status update**: ONNX export is now implemented — the web API serves the model via ONNX Runtime (see ADR-006), and `train_and_export.py` exports `.onnx` at the end of training.
 
 ---
 
@@ -50,7 +50,7 @@ Use **PyTorch** as the primary deep learning framework.
 
 ### Context
 
-The ASL dataset contains approximately 100 images per class across 29 classes (~2,900 images total). Training deep CNNs from scratch typically requires orders of magnitude more data to converge to useful representations. The project needs high accuracy with the available dataset size.
+At the time of this decision the ASL dataset contained ~100 images per class (~2,900 total); it has since grown to ~600 images/class (~17.4k total, `combined_training`). Even so, training deep CNNs from scratch typically requires far more data to converge, and the dataset comes from a single capture environment — so transfer learning remains the better fit for accuracy and generalization.
 
 Options considered:
 1. Train all models from scratch with random initialization
@@ -147,7 +147,7 @@ Use **per-frame 2D CNN classification** with **temporal smoothing as a post-proc
 - Lower inference latency (single forward pass per frame vs. clip-based processing)
 - Smaller memory footprint (no sequence buffering in model)
 - Easier to swap model backbones (any 2D image classifier works)
-- Temporal smoothing (majority voting, stability counting, cooldown) provides sufficient stability for static signs
+- Temporal smoothing (majority voting, stability counting, confidence gate) provides sufficient stability for static signs
 - Dataset requirements are simpler: individual images per class, not video sequences
 
 **Negative**:
@@ -234,6 +234,65 @@ Design for **local-first inference** with all processing (hand detection, image 
 
 ---
 
+## ADR-007: MediaPipe Hand-Crop Training for Train/Serve Parity
+
+**Status**: Accepted
+**Date**: 2026-07
+**Context**: Closing the gap between how images are framed during training and at inference.
+
+### Context
+
+The browser feeds the model a **tight MediaPipe hand crop** (square bounding box around the 21 landmarks, 25% padding), but the raw `combined_training` images are full webcam frames with background and forearm. A model trained on full frames reached high in-distribution validation accuracy yet generalized poorly to the live app — a classic train/serve distribution mismatch, compounded by the dataset coming from a single capture environment.
+
+Options considered:
+1. Train on full frames, crop only at inference (status quo — mismatch)
+2. Send full frames to the model at inference (background/lighting dependence)
+3. Crop the dataset the **same way** the app crops live frames, then train on crops
+
+### Decision
+
+Preprocess the dataset through MediaPipe into hand crops (`crop_dataset.py`) using the **exact bbox math as the frontend** (`getBounds`/`cropAndPredict`), and train on `datasets/combined_cropped`. Images with no detected hand fall back to a full-frame resize so no class loses samples.
+
+### Consequences
+
+**Positive**:
+- Training input matches inference input — the model sees the same framing both sides
+- Removes most background/scene dependence, improving live-webcam generalization
+- Deterministic and reproducible (`crop_dataset.py` is a one-shot batch step)
+
+**Negative**:
+- Adds a preprocessing step and a MediaPipe Tasks model dependency (`hand_landmarker.task`)
+- Classes with low hand-detection rates (e.g. `nothing`) rely on the full-frame fallback
+- In-distribution validation accuracy (≈99.8%) still overstates real-world accuracy given the single-environment dataset
+
+---
+
+## ADR-008: Per-Session Server State
+
+**Status**: Accepted
+**Date**: 2026-07
+**Context**: Isolating prediction/sentence state between concurrent web clients.
+
+### Context
+
+The initial web API used one global `TemporalSmoother` and a `"default"` sentence session shared by every WebSocket connection, so concurrent users cross-contaminated each other's smoothing and sentence. Client-supplied `session_id`s also created unbounded server state.
+
+### Decision
+
+Give **each WebSocket connection a unique session** (uuid) with its own `SentenceBuilder` + `TemporalSmoother`, evicted on disconnect. Store sessions in an **LRU-capped** map (`MAX_SESSIONS`) so client-supplied ids can't exhaust memory.
+
+### Consequences
+
+**Positive**:
+- Concurrent users are fully isolated; smoothing and sentences never mix
+- Bounded memory under session-id flooding; automatic cleanup on disconnect
+
+**Negative**:
+- Sessions are in-process only — horizontal scaling would need shared/sticky state
+- The HTTP endpoints still accept arbitrary `session_id`s (bounded, but not authenticated)
+
+---
+
 ## ADR Index
 
 | ID | Topic | Status |
@@ -244,3 +303,5 @@ Design for **local-first inference** with all processing (hand detection, image 
 | ADR-004 | Image-based classification over video-based | Accepted |
 | ADR-005 | Config-driven model selection | Accepted |
 | ADR-006 | Local-first inference design | Accepted |
+| ADR-007 | MediaPipe hand-crop train/serve parity | Accepted |
+| ADR-008 | Per-session server state | Accepted |

@@ -21,7 +21,7 @@ The problem domain — real-time gesture recognition from a video stream — is 
 ### Stage 1: Capture
 
 **Input**: None (webcam device)
-**Output**: Raw BGR frame (numpy array, 1280×720×3)
+**Output**: Raw BGR frame (numpy array, 640×480×3)
 **Component**: OpenCV `VideoCapture`
 
 Responsibility: Acquire frames at target frame rate (30 FPS). Applies horizontal flip for mirror-mode display.
@@ -64,7 +64,7 @@ Responsibility: Model forward pass. Applies softmax to logits. Maintains predict
 **Output**: Filtered letter commits
 **Component**: `TemporalSmoother` / `SentenceBuilder.update()`
 
-Responsibility: Three-layer smoothing — majority voting (5-frame window), stability counting (12 frames), cooldown (18 frames).
+Responsibility: Layered smoothing — majority voting (5-frame window), stability counting (12 frames), and a confidence gate (`CONFIDENCE_THRESHOLD`). (`COOLDOWN_FRAMES` is legacy/unused.)
 
 ### Stage 7: Output Formatting
 
@@ -196,7 +196,7 @@ The pipeline's stage boundaries align with natural API boundaries. Stages 1-3 mo
 
 **Anti-pattern**: Stages reading and writing a global state object, creating hidden dependencies and race conditions.
 
-**How avoided**: Data flows explicitly through function parameters and return values. The only mutable state is `SentenceBuilder.sentence`, which is intentionally centralized as the system's output accumulator.
+**How avoided**: Data flows explicitly through function parameters and return values. Mutable state is confined to the output accumulators — `SentenceBuilder.sentence` and the per-frame `TemporalSmoother` history. In the web API these are **per-session** (keyed by connection), so concurrent users never share mutable state.
 
 ### 3. Tight Coupling Between Detection and Classification
 

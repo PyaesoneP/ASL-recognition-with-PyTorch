@@ -45,6 +45,7 @@ The system is organized into 14 logical components grouped by responsibility dom
 | `test` | `datasets/asl_alphabet_test/` | Primary evaluation split |
 | `organized` | `datasets/asl_test_organized/` | Additional test data |
 | `combined` | `datasets/combined_training/` | Merged training set |
+| `cropped` | `datasets/combined_cropped/` | MediaPipe hand crops (train/serve parity, ADR-007) |
 | `custom` | `datasets/custom_dataset/` | User-captured images |
 
 **Interfaces**:
@@ -55,7 +56,7 @@ The system is organized into 14 logical components grouped by responsibility dom
 
 ### 1.3 DataAugmenter
 
-**Location**: Training notebook (`notebooks/ASL_PyTorch_Complete.ipynb`)
+**Location**: `train_and_export.py` (primary) / `notebooks/ASL_PyTorch_Complete.ipynb` (exploration)
 
 **Responsibility**: Applies randomized transformations to training data to improve model generalization.
 
@@ -74,7 +75,7 @@ The system is organized into 14 logical components grouped by responsibility dom
 
 ### 1.4 DataLoader
 
-**Location**: Training notebook
+**Location**: `train_and_export.py` (primary training path) / `notebooks/ASL_PyTorch_Complete.ipynb` (exploration)
 
 **Responsibility**: Batches and feeds training data to the model with class-balanced sampling.
 
@@ -127,7 +128,7 @@ The system is organized into 14 logical components grouped by responsibility dom
 
 ### 2.2 TrainingEngine
 
-**Location**: Training notebook
+**Location**: `train_and_export.py` (primary training path) / `notebooks/ASL_PyTorch_Complete.ipynb` (exploration)
 
 **Responsibility**: Orchestrates model training loop.
 
@@ -146,7 +147,7 @@ The system is organized into 14 logical components grouped by responsibility dom
 
 ### 2.3 ValidationEngine
 
-**Location**: Training notebook
+**Location**: `train_and_export.py` (primary training path) / `notebooks/ASL_PyTorch_Complete.ipynb` (exploration)
 
 **Responsibility**: Evaluates model on held-out test data.
 
@@ -164,7 +165,7 @@ The system is organized into 14 logical components grouped by responsibility dom
 
 ### 2.4 MetricsExporter
 
-**Location**: Training notebook
+**Location**: `train_and_export.py` (primary training path) / `notebooks/ASL_PyTorch_Complete.ipynb` (exploration)
 
 **Responsibility**: Persists training artifacts for analysis.
 
@@ -277,7 +278,9 @@ The system is organized into 14 logical components grouped by responsibility dom
 |-------|-----------|--------|--------|
 | Majority voting | Counter.most_common on history deque | 5 frames | Reduces frame-to-frame flicker |
 | Stability counting | Consecutive same-prediction counter | 12 frames | Confirms sustained gesture |
-| Cooldown | Post-commit lockout | 18 frames | Prevents double-counting |
+| Confidence gate | Reject commits below `CONFIDENCE_THRESHOLD` | — | Filters low-confidence predictions |
+
+> `COOLDOWN_FRAMES` is retained in config for backwards compatibility but is **not used** — the old frame-count cooldown was dead code and has been removed.
 
 **Interfaces**:
 - Input: stream of (class, confidence) tuples
@@ -295,7 +298,7 @@ The system is organized into 14 logical components grouped by responsibility dom
 - Handles special classes: `space` → space character, `del` → backspace
 - Filters predictions below confidence threshold
 - Ignores `nothing` class (no hand present)
-- Tracks current letter, stability count, and cooldown state
+- Tracks current letter and stability count
 - Provides progress indicator (0.0 to 1.0) toward next letter commit
 
 **Manual controls**:
@@ -351,7 +354,7 @@ The system is organized into 14 logical components grouped by responsibility dom
 |----------|-----------|
 | Paths | `BASE_DIR`, `DEFAULT_MODEL_PATH` |
 | Model selection | `MODEL_TYPES` list |
-| Dataset registry | `DATASETS` dict (5 entries) |
+| Dataset registry | `DATASETS` dict (6 entries) |
 | Prediction tuning | `CONFIDENCE_THRESHOLD`, `STABILITY_FRAMES`, `COOLDOWN_FRAMES`, `SMOOTHING_WINDOW`, `IMG_SIZE` |
 
 **Inference-layer overrides**: `src/inference/__init__.py` allows per-run overrides of `MODEL_PATH`, `MODEL_TYPE`, and prediction parameters.

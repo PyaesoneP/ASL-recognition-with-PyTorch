@@ -13,7 +13,8 @@ Webcam Feed → Hand Detection (MediaPipe) → ROI Crop → CNN Inference → Te
 | Stage | Component | Responsibility |
 |-------|-----------|----------------|
 | Data Collection | `src/scripts/capture_asl_images.py` | Interactive and batch image capture for dataset building |
-| Training | Jupyter notebook (`notebooks/ASL_PyTorch_Complete.ipynb`) | Model training with augmentation, validation, and metrics |
+| Cropping | `crop_dataset.py` | MediaPipe hand-crop preprocessing for train/serve parity (ADR-007) |
+| Training | `train_and_export.py` (exploration: `notebooks/ASL_PyTorch_Complete.ipynb`) | Train MobileNetV2 on hand crops, export ONNX |
 | Inference (local) | `src/inference/__init__.py` | Desktop webcam gesture-to-text pipeline (MediaPipe + PyTorch) |
 | Inference (web API) | `api/services/predictor.py` | ONNX Runtime inference service (self-contained, server-safe) |
 | Configuration | `src/config/settings.py` | Centralized model paths, dataset paths, prediction parameters |
@@ -37,8 +38,8 @@ Webcam Feed → Hand Detection (MediaPipe) → ROI Crop → CNN Inference → Te
 | Real-time feedback | Letter predictions overlaid on video feed with confidence scores | Immediate visual confirmation of recognized gestures |
 | Temporal stability | Majority voting over 5-frame window | Prevents prediction flicker and jitter |
 | Confirmation threshold | 12 consecutive frames (~0.4s at 30fps) | Balances responsiveness with accuracy |
-| Cooldown period | 18-frame cooldown between letter additions | Prevents double-counting of held gestures |
-| User controls | Keyboard-driven: quit, clear, space, backspace, screenshot, reset | Full editing control without leaving inference mode |
+| Confidence gate | Commits require ≥ `CONFIDENCE_THRESHOLD` | Filters low-confidence predictions before they commit |
+| User controls | Keyboard-driven: quit, clear, space, backspace, screenshot, reset (desktop); clear/space/backspace (web) | Full editing control without leaving inference mode |
 | Dual modes | MediaPipe auto-detect and simple manual ROI | Graceful degradation when MediaPipe unavailable |
 
 ### 2.3 Accuracy & Reliability
@@ -49,7 +50,7 @@ Webcam Feed → Hand Detection (MediaPipe) → ROI Crop → CNN Inference → Te
 | Class coverage | 29 classes (A-Z excluding motion-required J, Z; plus del, nothing, space) | Covers static alphabet signs |
 | Model options | 4 interchangeable backbones: MobileNetV2, ResNet50, EfficientNet-B0, Custom CNN | Trade-off flexibility between speed and accuracy |
 | Swapability | Model type selected via config; inference transforms match training transforms | Guarantees consistent behavior across model swaps |
-| Prediction smoothing | Majority voting + stability counting + cooldown | Three-layer defense against erratic predictions |
+| Prediction smoothing | Majority voting + stability counting + confidence gate | Layered defense against erratic predictions |
 
 ### 2.4 Extensibility
 
@@ -65,11 +66,13 @@ Webcam Feed → Hand Detection (MediaPipe) → ROI Crop → CNN Inference → Te
 
 | Characteristic | Target | Rationale |
 |---------------|--------|-----------|
-| Data handling | All image processing local; no external data transmission | User privacy preserved during inference |
-| Model protection | `.pth` files stored locally in `outputs/models/` | Trained models remain under user control |
-| Webcam access | Direct device access only; no streaming to external services | Minimizes attack surface |
-| Web deployment auth | Planned API authentication for cloud deployment | Prevents unauthorized model access when deployed |
-| Captured data retention | User-controlled; captured images stored locally | No automatic upload or cloud sync |
+| Local mode data handling | Desktop inference is fully local; no external transmission | User privacy preserved for the desktop pipeline |
+| Web mode data handling | Browser sends **cropped hand images** (not the full frame) to the API; nothing is persisted server-side | Minimises what leaves the client; images are processed in-memory only |
+| Session isolation | Each WebSocket connection gets its own `SentenceBuilder` + `TemporalSmoother`, evicted on disconnect, with an LRU cap (`MAX_SESSIONS`) | Concurrent users never share state; bounds memory against session-id flooding |
+| Input hardening | `MAX_IMAGE_BYTES` / `MAX_IMAGE_PIXELS` limits + PIL decompression-bomb guard on public endpoints | Rejects oversized/malicious payloads (DoS) |
+| CORS | `allow_credentials` disabled under wildcard origins; `ALLOWED_ORIGINS` locks it to known domains | Prevents credentialed cross-origin abuse |
+| Web deployment auth | Planned — no authentication yet | Prevents unauthorized model access when deployed |
+| Model protection | `.onnx` served by the API; `.pth`/`.onnx` in `outputs/models/` (Git LFS) | Weights remain under repo owner control |
 
 ### 2.6 Portability
 
@@ -99,7 +102,8 @@ Webcam Feed → Hand Detection (MediaPipe) → ROI Crop → CNN Inference → Te
 | Computer vision | OpenCV | Camera access, image processing, UI rendering |
 | Numerical computing | NumPy | Array operations, probability handling |
 | Model architectures | Transfer learning (ImageNet pretrained) + custom CNN | Classification backbones |
-| Training environment | Jupyter Notebook | Iterative model development |
+| Training pipeline | `crop_dataset.py` + `train_and_export.py` | Hand-crop preprocessing + training/ONNX export (notebook for exploration) |
+| Inference runtime (web) | ONNX Runtime | Optimised CPU inference in the API |
 | Target deployment | Live web application | End-user delivery channel |
 
 ## 4. Data Architecture
@@ -111,17 +115,19 @@ datasets/
   asl_alphabet_train/     ← Primary training data
   asl_alphabet_test/      ← Primary test data
   asl_test_organized/     ← Additional organized test data
-  combined_training/      ← Merged training dataset
+  combined_training/      ← Merged training dataset (~600 images/class × 29)
+  combined_cropped/       ← MediaPipe hand crops of combined_training (ADR-007)
   custom_dataset/         ← User-captured images
 ```
 
 ### Data Flow
 
-1. **Collection**: Webcam captures ROI-cropped images per class (target: 100 images/class)
-2. **Augmentation**: Random horizontal flip, color jitter, rotation, and normalization during training
-3. **Training**: Combined dataset with oversampling for class balance
-4. **Validation**: Separate test split for accuracy metrics
-5. **Inference**: Live frames processed with same transforms as training
+1. **Collection**: Webcam captures ROI-cropped images per class (~600 images/class, 29 classes ≈ 17.4k images)
+2. **Hand-cropping**: `crop_dataset.py` re-crops the dataset to the MediaPipe hand region, matching the live app (ADR-007)
+3. **Augmentation**: Random crop, horizontal flip, color jitter, rotation, and normalization during training
+4. **Training**: Deterministic stratified per-class train/val split (no leakage across classes)
+5. **Validation**: Held-out per-class split for accuracy metrics
+6. **Inference**: Live frames processed with the same crop + transforms as training
 
 ### Image Specs
 
@@ -153,8 +159,8 @@ datasets/
 
 ```
 Raw Frame → MediaPipe Hand Detection → Landmark-based ROI Crop (25% padding)
-→ Square Resize → Center Crop → 224×224 → Tensor → Normalize → Model Forward Pass
-→ Softmax Probabilities → Confidence Check → Temporal Smoothing → Letter Output
+→ Resize to 224×224 → Tensor → Normalize (ImageNet) → Model Forward Pass
+→ Softmax Probabilities → Confidence Gate → Temporal Smoothing → Letter Output
 ```
 
 ### Temporal Smoothing
@@ -163,8 +169,9 @@ Raw Frame → MediaPipe Hand Detection → Landmark-based ROI Crop (25% padding)
 |-----------|-------|---------|
 | Smoothing window | 5 frames | Majority voting over recent predictions |
 | Stability frames | 12 frames | Consecutive same prediction to commit letter |
-| Cooldown frames | 18 frames | Minimum interval between letter additions |
-| Confidence threshold | 0.65 | Minimum probability to accept prediction |
+| Confidence threshold | 0.65 | Minimum probability for a prediction to count toward a commit |
+
+> `COOLDOWN_FRAMES` remains in config for compatibility but is unused; the old frame-count cooldown was dead code and has been removed.
 
 ## 7. Deployment Considerations
 
@@ -187,6 +194,6 @@ Raw Frame → MediaPipe Hand Detection → Landmark-based ROI Crop (25% padding)
 
 - Two-handed sign recognition (J, Z, numbers)
 - Continuous gesture sequences beyond single letters
-- Multi-user support
+- API authentication for public deployments (multi-user session isolation is already implemented)
 - Mobile deployment
 - Model retraining pipeline automation

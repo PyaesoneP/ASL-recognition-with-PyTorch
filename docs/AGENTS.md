@@ -8,7 +8,7 @@
 |-----|----------|
 | [`architectural_style.md`](./architectural_style.md) | Pipeline stages 1–8, client/server split, anti-patterns, data flow |
 | [`logical_components.md`](./logical_components.md) | 14 components, interfaces, dependency map |
-| [`architectural_decisions.md`](./architectural_decisions.md) | 6 ADRs (PyTorch, transfer learning, MediaPipe, image-based, config-driven, local-first) |
+| [`architectural_decisions.md`](./architectural_decisions.md) | 8 ADRs (PyTorch, transfer learning, MediaPipe, image-based, config-driven, local-first, hand-crop parity, per-session state) |
 | [`architectural_characteristics.md`](./architectural_characteristics.md) | NFRs, perf targets, tech stack, deployment |
 
 ## Project Structure
@@ -24,7 +24,9 @@ api/                            ← Web API service
   requirements.txt
   Dockerfile
 frontend/                       ← Browser client (MediaPipe JS + vanilla JS)
-notebooks/ASL_PyTorch_Complete.ipynb ← Training
+crop_dataset.py                 ← MediaPipe hand-crop preprocessing (train/serve parity, ADR-007)
+train_and_export.py             ← Train MobileNetV2 on crops → export ONNX
+notebooks/ASL_PyTorch_Complete.ipynb ← Training exploration
 outputs/models/                 ← Trained checkpoints (.pth) and ONNX exports (.onnx)
 outputs/metrics/                ← Training metrics
 ```
@@ -57,7 +59,7 @@ outputs/metrics/                ← Training metrics
 
 - **Config-driven**: All thresholds/paths from `src/config/settings.py` — no magic numbers in code
 - **29 classes**: A–Z + `del`, `nothing`, `space`
-- **Smoothing params**: 5-frame window, 12 stability frames, 18 cooldown, 0.65 confidence
+- **Smoothing params**: 5-frame majority-vote window, 12 stability frames, 0.65 confidence gate (`COOLDOWN_FRAMES` is legacy/unused)
 - **Input size**: 224×224, ImageNet mean/std normalization
 - **4 model backbones**: MobileNetV2, ResNet50, EfficientNet-B0, CustomCNN (strategy via `ModelRegistry`)
 - **Self-contained API**: `api/services/predictor.py` does not import from `src.inference` (avoids mediapipe segfault in server)
