@@ -3,7 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ASL Recognition</title>
+    <meta name="description" content="Real-time American Sign Language decoder — webcam hand-sign recognition running on-device.">
+    <meta name="theme-color" content="#0b0c0e">
+    <title>ASL · Decoder</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap">
     <link rel="stylesheet" href="/static/css/style.css">
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
@@ -11,49 +17,91 @@
 </head>
 <body>
     <div class="app-container">
-        <header>
-            <h1>ASL Recognition</h1>
-            <div class="status-indicator" id="statusIndicator">
-                <span class="status-dot"></span>
-                <span class="status-text">Initializing...</span>
+        <header class="system-rail">
+            <div class="brand">
+                <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+                    <g fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M4 9V4h5"/><path d="M23 4h5v5"/>
+                        <path d="M28 23v5h-5"/><path d="M9 28H4v-5"/>
+                    </g>
+                    <circle cx="16" cy="16" r="2.5" fill="currentColor"/>
+                </svg>
+                <span class="brand-name">ASL<span class="brand-sep">·</span>DECODER</span>
+            </div>
+            <div class="rail-readouts">
+                <span class="readout"><b>MODEL</b> MOBILENET-V2</span>
+                <span class="readout"><b>STREAM</b> 640×480</span>
+                <span class="readout"><b>UPTIME</b> <span id="clock">00:00</span></span>
+                <div class="status-indicator" id="statusIndicator">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Initializing…</span>
+                </div>
             </div>
         </header>
 
         <main class="main-content">
-            <div class="video-section">
+            <section class="panel video-section">
+                <div class="panel-label"><span class="idx">01</span> Viewfinder</div>
                 <div class="video-container">
                     <video id="video" playsinline autoplay></video>
                     <canvas id="overlay"></canvas>
                     <div class="roi-box" id="roiBox"></div>
+                    <div class="vf-frame" aria-hidden="true">
+                        <span class="vf-cross"></span>
+                        <span class="vf-scan"></span>
+                    </div>
+                    <div class="vf-ticks" aria-hidden="true">
+                        <span class="tick tl">CH·01</span>
+                        <span class="tick tr">REC <i></i></span>
+                        <span class="tick bl">640×480</span>
+                        <span class="tick br">f/2.0 · 30fps</span>
+                    </div>
                 </div>
                 <div class="prediction-display">
-                    <div class="prediction-label" id="predictionLabel">No gesture</div>
-                    <div class="confidence-bar" id="confidenceBar">
-                        <div class="confidence-fill" id="confidenceFill"></div>
+                    <div class="readout-block sign">
+                        <div class="micro-label">Detected sign</div>
+                        <div class="prediction-label" id="predictionLabel">—</div>
                     </div>
-                    <div class="confidence-value" id="confidenceValue">0%</div>
+                    <div class="readout-block conf">
+                        <div class="micro-label">Confidence <span class="conf-val" id="confidenceValue">0%</span></div>
+                        <div class="confidence-bar" id="confidenceBar">
+                            <div class="confidence-fill" id="confidenceFill"></div>
+                        </div>
+                        <div class="conf-scale"><span>0</span><span>50</span><span>100</span></div>
+                    </div>
                 </div>
-            </div>
+            </section>
 
-            <div class="sentence-section">
-                <div class="sentence-header">
-                    <span>Sentence</span>
+            <section class="panel sentence-section">
+                <div class="panel-label">
+                    <span class="idx">02</span> Transcript
                     <div class="sentence-controls">
                         <button class="ctrl-btn" id="btnSpace" title="Space">Space</button>
                         <button class="ctrl-btn" id="btnDel" title="Backspace">Del</button>
                         <button class="ctrl-btn danger" id="btnClear" title="Clear all">Clear</button>
                     </div>
                 </div>
-                <div class="sentence-box" id="sentenceBox">Start signing to build a sentence...</div>
+                <div class="sentence-box empty" id="sentenceBox">Start signing to build a sentence…</div>
                 <div class="keyboard-hints">
-                    <kbd>Space</kbd> add space &nbsp;
-                    <kbd>Backspace</kbd> delete last &nbsp;
+                    <kbd>Space</kbd> add space
+                    <kbd>Backspace</kbd> delete last
                     <kbd>C</kbd> clear all
                 </div>
-            </div>
+            </section>
         </main>
     </div>
 
+    <script>
+        // Uptime readout — isolated, cosmetic instrument detail.
+        (function () {
+            var el = document.getElementById('clock'), t0 = Date.now();
+            setInterval(function () {
+                var s = Math.floor((Date.now() - t0) / 1000);
+                var m = String(Math.floor(s / 60)).padStart(2, '0');
+                el.textContent = m + ':' + String(s % 60).padStart(2, '0');
+            }, 1000);
+        })();
+    </script>
     <script src="/static/js/sentence.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
