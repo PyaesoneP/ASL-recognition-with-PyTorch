@@ -42,7 +42,7 @@ try:
     SMOOTHING_WINDOW = PREDICTION_DEFAULTS["SMOOTHING_WINDOW"]
     IMG_SIZE = PREDICTION_DEFAULTS["IMG_SIZE"]
 
-    if len(sys.path) > 0:
+    if _settings_base in sys.path:
         sys.path.remove(_settings_base)
 except ImportError:
     CONFIDENCE_THRESHOLD = 0.65
@@ -119,19 +119,19 @@ class ImagePreprocessor:
         """
         # 1. BGR to RGB
         image_rgb = image_bgr[:, :, ::-1].copy()
-        
+
         # 2. Resize
         image_resized = Image.fromarray(image_rgb).resize((self.img_size, self.img_size))
         image_arr = np.array(image_resized).astype(np.float32)
-        
-        # 3. Normalize
+
+        # 3. HWC to CHW and normalize per-channel
+        image_arr = image_arr.transpose(2, 0, 1)  # (3, 224, 224)
         image_arr /= 255.0
         image_arr = (image_arr - self.mean) / self.std
-        
-        # 4. HWC to CHW and add batch dimension
-        image_arr = image_arr.transpose(2, 0, 1)
+
+        # 4. Add batch dimension
         image_arr = np.expand_dims(image_arr, axis=0)
-        
+
         return image_arr
 
 # ---------------------------------------------------------------------------
@@ -347,20 +347,12 @@ class InferenceService:
             builder.update(prediction)
         return builder.get_sentence()
 
-    def _get_session_builder(self, session_id: str) -> SentenceBuilder:
-        if session_id not in self._sentence_builders:
-            self._sentence_builders[session_id] = SentenceBuilder()
-        return self._sentence_builders[session_id]
-
-    def decode_base64_image(self, base64_str: str) -> np.ndarray:
-        if isinstance(base64_str, str):
-            if "," in base64_str:
-                base64_str = base64_str.split(",")[1]
-            image_bytes = base64.b64decode(base64_str)
-            image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-            return cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-        return base64_str
-
+    def get_sentence(self, session_id: str = "default") -> str:
+        """Retrieve the current sentence for a given session."""
+        if not self._initialized:
+            self.initialize()
+        builder = self._get_session_builder(session_id)
+        return builder.get_sentence()
 
     def _get_session_builder(self, session_id: str) -> SentenceBuilder:
         if session_id not in self._sentence_builders:
