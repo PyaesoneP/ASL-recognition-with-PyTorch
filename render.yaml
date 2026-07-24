@@ -4,7 +4,7 @@ services:
     name: asl-recognition-backend
     env: docker
     plan: free
-    region: eu.oregon.us
+    region: singapore
     env_vars:
       - key: MODEL_TYPE
         value: mobilenet_v2
