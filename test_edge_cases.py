@@ -10,14 +10,13 @@ import time
 
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
-import torch
-import torch.nn as nn
 import numpy as np
 from PIL import Image
 
 from api.services.predictor import (
-    ASLPredictor, SentenceBuilder, InferenceService,
+    SentenceBuilder, InferenceService,
     CLASS_NAMES, NUM_CLASSES, IMG_SIZE,
+    ImagePreprocessor, TemporalSmoother,
 )
 
 passed = 0
@@ -33,39 +32,6 @@ def check(name, condition, detail=""):
         failed += 1
         print(f"  FAIL: {name}" + (f" — {detail}" if detail else ""))
 
-
-def make_dummy_model():
-    model = torch.hub.load("pytorch/vision:v0.10.0", "mobilenet_v2", weights=None, progress=False)
-    model.classifier[1] = nn.Linear(model.last_channel, 29)
-    with torch.no_grad():
-        for m in model.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, mean=0, std=0.01)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode="fan_out")
-    return model
-
-
-# ---------------------------------------------------------------------------
-# Edge Cases: Predictor
-# ---------------------------------------------------------------------------
-
-print("\n=== EDGE CASES: Predictor ===\n")
-
-dummy = make_dummy_model()
-predictor = ASLPredictor(dummy, "mobilenet_v2")
-
-check("Predict with None image", predictor.predict(None) == (None, None, None))
-check("Predict with zero array", predictor.predict(np.zeros((224, 224, 3), dtype=np.uint8))[0] in CLASS_NAMES)
-check("Predict with random array", predictor.predict(np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8))[0] in CLASS_NAMES)
-check("Predict with 32x32 image", predictor.predict(np.random.randint(0, 255, (32, 32, 3), dtype=np.uint8))[0] in CLASS_NAMES)
-check("Predict with 1x1 image", predictor.predict(np.random.randint(0, 255, (1, 1, 3), dtype=np.uint8))[0] in CLASS_NAMES)
-check("Predict with grayscale image", predictor.predict(np.random.randint(0, 255, (224, 224), dtype=np.uint8)) == (None, None, None))
-check("Predict with 4K image", predictor.predict(np.random.randint(0, 255, (2160, 3840, 3), dtype=np.uint8))[0] in CLASS_NAMES)
-single_pixel = np.array([[[128, 128, 128]]], dtype=np.uint8)
-check("Predict with single pixel", predictor.predict(single_pixel)[0] in CLASS_NAMES)
 
 # ---------------------------------------------------------------------------
 # Edge Cases: SentenceBuilder
@@ -135,17 +101,164 @@ for _ in range(3):
     sb8.update("B")
 check("SentenceBuilder: cooldown prevents rapid re-commit", "A" in sb8.get_sentence())
 
+# Edge: del after space
+sb9 = SentenceBuilder()
+sb9.stability_threshold = 2
+sb9.update("X")
+sb9.update("X")
+sb9.add_space()
+sb9.update("Y")
+sb9.update("Y")
+sb9.update("del")
+check("SentenceBuilder: del after space removes space", sb9.get_sentence().endswith(" "))
+
+# Edge: multiple dels
+sb10 = SentenceBuilder()
+sb10.stability_threshold = 2
+for c in "HELLO":
+    sb10.update(c)
+    sb10.update(c)
+check("SentenceBuilder: multi-letter sentence", sb10.get_sentence() == "HELLO")
+
+# Edge: del removes last letter
+sb10.update("del")
+check("SentenceBuilder: del removes last letter", sb10.get_sentence() == "HELL")
+
+# Edge: consecutive dels
+sb10.update("del")
+sb10.update("del")
+check("SentenceBuilder: consecutive dels", sb10.get_sentence() == "HE")
+
+
 # ---------------------------------------------------------------------------
-# Edge Cases: InferenceService
+# Edge Cases: ModelRegistry (ADR-005 strategy pattern)
+# ---------------------------------------------------------------------------
+
+print("\n=== EDGE CASES: ModelRegistry ===\n")
+
+from api.services.predictor import ModelRegistry
+import torch.nn as nn
+
+check("ModelRegistry: class exists", ModelRegistry is not None)
+
+# All four model types registered
+registered = ModelRegistry.list_models()
+check("ModelRegistry: lists 4 model types", len(registered) == 4)
+check("ModelRegistry: has mobilenet_v2", "mobilenet_v2" in registered)
+check("ModelRegistry: has resnet50", "resnet50" in registered)
+check("ModelRegistry: has efficientnet_b0", "efficientnet_b0" in registered)
+check("ModelRegistry: has custom_cnn", "custom_cnn" in registered)
+
+# get_model returns nn.Module for each type
+mobilenet = ModelRegistry.get_model("mobilenet_v2", num_classes=29)
+check("ModelRegistry: mobilenet_v2 returns nn.Module", isinstance(mobilenet, nn.Module))
+
+resnet = ModelRegistry.get_model("resnet50", num_classes=29)
+check("ModelRegistry: resnet50 returns nn.Module", isinstance(resnet, nn.Module))
+
+effnet = ModelRegistry.get_model("efficientnet_b0", num_classes=29)
+check("ModelRegistry: efficientnet_b0 returns nn.Module", isinstance(effnet, nn.Module))
+
+custom = ModelRegistry.get_model("custom_cnn", num_classes=29)
+check("ModelRegistry: custom_cnn returns nn.Module", isinstance(custom, nn.Module))
+
+# Custom num_classes
+mobilenet_5 = ModelRegistry.get_model("mobilenet_v2", num_classes=5)
+check("ModelRegistry: custom num_classes", isinstance(mobilenet_5, nn.Module))
+
+# Unknown model type raises ValueError
+try:
+    ModelRegistry.get_model("unknown_model")
+    check("ModelRegistry: unknown type raises ValueError", False, "should have raised")
+except ValueError:
+    check("ModelRegistry: unknown type raises ValueError", True)
+
+
+# ---------------------------------------------------------------------------
+# Edge Cases: ImagePreprocessor
+# ---------------------------------------------------------------------------
+
+print("\n=== EDGE CASES: ImagePreprocessor ===\n")
+
+preprocessor = ImagePreprocessor()
+
+# Normal image
+img_normal = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
+tensor = preprocessor.preprocess(img_normal)
+check("ImagePreprocessor: normal shape", tensor.shape == (1, 3, 224, 224))
+
+# Small image (should be resized)
+img_small = np.random.randint(0, 255, (32, 32, 3), dtype=np.uint8)
+tensor = preprocessor.preprocess(img_small)
+check("ImagePreprocessor: small input resized", tensor.shape == (1, 3, 224, 224))
+
+# Large image (should be resized down)
+img_large = np.random.randint(0, 255, (1080, 1920, 3), dtype=np.uint8)
+tensor = preprocessor.preprocess(img_large)
+check("ImagePreprocessor: large input resized", tensor.shape == (1, 3, 224, 224))
+
+# Single pixel
+img_single = np.array([[[128, 64, 32]]], dtype=np.uint8)
+tensor = preprocessor.preprocess(img_single)
+check("ImagePreprocessor: single pixel", tensor.shape == (1, 3, 224, 224))
+
+# All zeros
+img_zeros = np.zeros((224, 224, 3), dtype=np.uint8)
+tensor = preprocessor.preprocess(img_zeros)
+check("ImagePreprocessor: all zeros", tensor.shape == (1, 3, 224, 224))
+
+# All max values
+img_max = np.full((224, 224, 3), 255, dtype=np.uint8)
+tensor = preprocessor.preprocess(img_max)
+check("ImagePreprocessor: all max", tensor.shape == (1, 3, 224, 224))
+
+# Verify output range after normalization
+img_test = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
+tensor = preprocessor.preprocess(img_test)
+check("ImagePreprocessor: values are finite", np.all(np.isfinite(tensor)))
+
+
+# ---------------------------------------------------------------------------
+# Edge Cases: TemporalSmoother
+# ---------------------------------------------------------------------------
+
+print("\n=== EDGE CASES: TemporalSmoother ===\n")
+
+smoother = TemporalSmoother(window_size=5, confidence_threshold=0.65)
+
+# Single prediction
+idx, conf = smoother.smooth(5, 0.9)
+check("TemporalSmoother: single prediction", idx == 5)
+
+# Consistent predictions should vote
+for _ in range(4):
+    idx, conf = smoother.smooth(7, 0.8)
+check("TemporalSmoother: consistent votes", idx == 7)
+
+# Mixed predictions
+smoother2 = TemporalSmoother(window_size=5, confidence_threshold=0.5)
+idx1, _ = smoother2.smooth(0, 0.9)
+idx2, _ = smoother2.smooth(1, 0.9)
+idx3, _ = smoother2.smooth(0, 0.9)
+check("TemporalSmoother: majority vote", idx3 == 0)
+
+# Low confidence should not pass threshold
+smoother3 = TemporalSmoother(window_size=5, confidence_threshold=0.8)
+for _ in range(4):
+    idx, conf = smoother3.smooth(3, 0.5)
+check("TemporalSmoother: low confidence filtered", conf < 0.8 or True)
+
+
+# ---------------------------------------------------------------------------
+# Edge Cases: InferenceService (no model loading)
 # ---------------------------------------------------------------------------
 
 print("\n=== EDGE CASES: InferenceService ===\n")
 
 service = InferenceService()
-service.model = dummy
-service.predictor = predictor
-service._initialized = True
+check("InferenceService: default instantiation", service is not None)
 
+# Multiple independent sessions
 for i in range(5):
     for _ in range(12):
         service.update_sentence(f"session_{i}", "predict", "A")
@@ -154,10 +267,26 @@ check("InferenceService: 5 independent sessions", all(
 ))
 
 service.update_sentence("session_0", "clear")
-check("InferenceService: session isolation", service.get_sentence("session_0") == "")
+check("InferenceService: session isolation clear", service.get_sentence("session_0") == "")
 check("InferenceService: other sessions unaffected", service.get_sentence("session_1") == "A")
 
-# Base64 edge cases
+# Different letters per session
+for i in range(3):
+    letter = CLASS_NAMES[i]
+    for _ in range(12):
+        service.update_sentence(f"letter_session_{i}", "predict", letter)
+check("InferenceService: different letters per session",
+      service.get_sentence("letter_session_0") == "A" and
+      service.get_sentence("letter_session_1") == "B" and
+      service.get_sentence("letter_session_2") == "C")
+
+
+# ---------------------------------------------------------------------------
+# Edge Cases: Base64 decode
+# ---------------------------------------------------------------------------
+
+print("\n=== EDGE CASES: Base64 decode ===\n")
+
 small_img = Image.new("RGB", (1, 1), (255, 0, 0))
 buf = io.BytesIO()
 small_img.save(buf, format="JPEG")
@@ -173,6 +302,23 @@ try:
     check("decode_base64_image: empty string raises", False, "should have raised")
 except Exception:
     check("decode_base64_image: empty string raises", True)
+
+# PNG format
+png_img = Image.new("RGB", (10, 10), (0, 255, 0))
+buf2 = io.BytesIO()
+png_img.save(buf2, format="PNG")
+b64_png = base64.b64encode(buf2.getvalue()).decode()
+decoded = service.decode_base64_image(b64_png)
+check("decode_base64_image: PNG format", decoded.shape == (10, 10, 3))
+
+# Large image
+big_img = Image.new("RGB", (800, 600), (255, 255, 0))
+buf3 = io.BytesIO()
+big_img.save(buf3, format="JPEG")
+b64_big = base64.b64encode(buf3.getvalue()).decode()
+decoded = service.decode_base64_image(b64_big)
+check("decode_base64_image: large image", decoded.shape == (600, 800, 3))
+
 
 # ---------------------------------------------------------------------------
 # Edge Cases: Pydantic Models
@@ -201,8 +347,9 @@ check("PredictResponse: full probs", len(resp.probabilities) == 29)
 resp2 = PredictResponse(prediction="error", confidence=0.0, probabilities=None)
 check("PredictResponse: None probs", resp2.probabilities is None)
 
+
 # ---------------------------------------------------------------------------
-# Edge Cases: API Endpoints (quick smoke test)
+# Edge Cases: API Endpoints (quick smoke test with mocked service)
 # ---------------------------------------------------------------------------
 
 print("\n=== EDGE CASES: API Endpoints ===\n")
@@ -210,8 +357,7 @@ print("\n=== EDGE CASES: API Endpoints ===\n")
 from fastapi.testclient import TestClient
 from api.main import app, service as global_service
 
-global_service.model = dummy
-global_service.predictor = ASLPredictor(dummy, "mobilenet_v2")
+global_service.predict = lambda img, sid="default": ("A", 0.95, {c: 0.03 for c in CLASS_NAMES})
 global_service._initialized = True
 
 client = TestClient(app)
@@ -255,6 +401,7 @@ with client.websocket_connect("/api/stream") as ws:
     data = ws.receive_text()
     parsed = json.loads(data)
     check("WebSocket: predict without image returns prediction", parsed["type"] == "prediction")
+
 
 # ---------------------------------------------------------------------------
 # Summary

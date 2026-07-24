@@ -3,28 +3,11 @@ ASL Real-Time Recognition with PyTorch, MediaPipe & Sentence Builder
 =====================================================================
 ET0732 Machine Learning & Artificial Intelligence Mini Project
 
-Features:
-- PyTorch MobileNetV2/Custom model for ASL alphabet recognition
-- MediaPipe hand detection for automatic hand cropping
-- Sentence builder with word accumulation
-- Prediction smoothing to reduce flickering
-- Visual feedback and confidence display
-
-Controls:
-- Q: Quit
-- C: Clear sentence
-- SPACE: Add space manually
-- BACKSPACE: Delete last character
-- S: Save screenshot
-- R: Reset prediction history
+Desktop webcam application — NOT for server use.
+For the web API, see api/services/predictor.py (ONNX Runtime).
 
 Requirements:
 pip install torch torchvision opencv-python mediapipe numpy
-
-Authors: Pyae Sone, Hou Jia Jun
-Date: January 2026
-
-IMPORTANT: Run on Windows directly, NOT in WSL2!
 """
 
 import cv2
@@ -44,38 +27,41 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
-from src.config.settings import BASE_DIR, DEFAULT_MODEL_PATH, PREDICTION_DEFAULTS
+try:
+    from src.config.settings import BASE_DIR, DEFAULT_MODEL_PATH, PREDICTION_DEFAULTS
+except ImportError:
+    # Fallback for direct execution without proper package structure
+    BASE_DIR = Path(__file__).resolve().parents[2]
+    DEFAULT_MODEL_PATH = "outputs/models/best_mobilenet_v2.pth"
+    PREDICTION_DEFAULTS = {
+        "CONFIDENCE_THRESHOLD": 0.65,
+        "STABILITY_FRAMES": 12,
+        "COOLDOWN_FRAMES": 18,
+        "SMOOTHING_WINDOW": 5,
+        "IMG_SIZE": 224,
+    }
 
 # ============================================================
 # CONFIGURATION - UPDATE THESE!
 # ============================================================
 
-# Model path - UPDATE THIS to your saved model location
 MODEL_PATH = str(BASE_DIR / DEFAULT_MODEL_PATH)
-MODEL_TYPE = "mobilenet_v2"  # Options: mobilenet_v2, resnet50, efficientnet_b0, custom_cnn
+MODEL_TYPE = "mobilenet_v2"
 
-# Image size (must match training!)
 IMG_SIZE = PREDICTION_DEFAULTS["IMG_SIZE"]
 
-# Class names (must match training order!)
 CLASS_NAMES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
                'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
                'del', 'nothing', 'space']
 NUM_CLASSES = 29
 
-# Prediction settings
 CONFIDENCE_THRESHOLD = PREDICTION_DEFAULTS["CONFIDENCE_THRESHOLD"]
 STABILITY_FRAMES = PREDICTION_DEFAULTS["STABILITY_FRAMES"]
 COOLDOWN_FRAMES = PREDICTION_DEFAULTS["COOLDOWN_FRAMES"]
 SMOOTHING_WINDOW = PREDICTION_DEFAULTS["SMOOTHING_WINDOW"]
 
-# Device
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-
-# ============================================================
-# IMAGE TRANSFORMS (must match training!)
-# ============================================================
 
 inference_transforms = transforms.Compose([
     transforms.ToPILImage(),
@@ -88,10 +74,6 @@ inference_transforms = transforms.Compose([
 ])
 
 
-# ============================================================
-# MODEL DEFINITIONS
-# ============================================================
-
 class CustomCNN(nn.Module):
     """Custom CNN architecture (must match training!)"""
     
@@ -99,7 +81,6 @@ class CustomCNN(nn.Module):
         super(CustomCNN, self).__init__()
         
         self.conv_blocks = nn.Sequential(
-            # Block 1
             nn.Conv2d(3, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(inplace=True),
@@ -109,7 +90,6 @@ class CustomCNN(nn.Module):
             nn.MaxPool2d(2, 2),
             nn.Dropout2d(0.25),
             
-            # Block 2
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
@@ -119,7 +99,6 @@ class CustomCNN(nn.Module):
             nn.MaxPool2d(2, 2),
             nn.Dropout2d(0.25),
             
-            # Block 3
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
@@ -129,7 +108,6 @@ class CustomCNN(nn.Module):
             nn.MaxPool2d(2, 2),
             nn.Dropout2d(0.25),
             
-            # Block 4
             nn.Conv2d(128, 256, kernel_size=3, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
@@ -164,7 +142,6 @@ def load_model(model_path, model_type, num_classes=29):
     """Load trained PyTorch model."""
     print(f"Loading {model_type} model from: {model_path}")
     
-    # Create model architecture
     if model_type == 'mobilenet_v2':
         model = models.mobilenet_v2(weights=None)
         model.classifier[1] = nn.Linear(model.last_channel, num_classes)
@@ -183,7 +160,6 @@ def load_model(model_path, model_type, num_classes=29):
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     
-    # Load weights
     checkpoint = torch.load(model_path, map_location=DEVICE, weights_only=False)
     
     if 'model_state_dict' in checkpoint:
@@ -197,10 +173,6 @@ def load_model(model_path, model_type, num_classes=29):
     print(f"Model loaded successfully on {DEVICE}!")
     return model
 
-
-# ============================================================
-# MEDIAPIPE HAND DETECTOR
-# ============================================================
 
 class HandDetector:
     """MediaPipe-based hand detection and tracking."""
@@ -218,10 +190,7 @@ class HandDetector:
         )
     
     def find_hands(self, frame, draw=True):
-        """
-        Detect hands in frame and optionally draw landmarks.
-        Returns: frame, list of hand bounding boxes [(x, y, w, h), ...]
-        """
+        """Detect hands in frame and optionally draw landmarks."""
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.hands.process(frame_rgb)
         
@@ -229,7 +198,6 @@ class HandDetector:
         
         if results.multi_hand_landmarks:
             for hand_landmarks in results.multi_hand_landmarks:
-                # Draw landmarks
                 if draw:
                     self.mp_draw.draw_landmarks(
                         frame,
@@ -239,7 +207,6 @@ class HandDetector:
                         self.mp_styles.get_default_hand_connections_style()
                     )
                 
-                # Get bounding box
                 h, w, _ = frame.shape
                 x_coords = [lm.x * w for lm in hand_landmarks.landmark]
                 y_coords = [lm.y * h for lm in hand_landmarks.landmark]
@@ -247,7 +214,6 @@ class HandDetector:
                 x_min, x_max = int(min(x_coords)), int(max(x_coords))
                 y_min, y_max = int(min(y_coords)), int(max(y_coords))
                 
-                # Add padding (25%)
                 padding_x = int((x_max - x_min) * 0.25)
                 padding_y = int((y_max - y_min) * 0.25)
                 
@@ -256,12 +222,10 @@ class HandDetector:
                 x_max = min(w, x_max + padding_x)
                 y_max = min(h, y_max + padding_y)
                 
-                # Make square (use larger dimension)
                 box_w = x_max - x_min
                 box_h = y_max - y_min
                 box_size = max(box_w, box_h)
                 
-                # Center the square box
                 center_x = (x_min + x_max) // 2
                 center_y = (y_min + y_max) // 2
                 
@@ -278,10 +242,6 @@ class HandDetector:
         self.hands.close()
 
 
-# ============================================================
-# ASL PREDICTOR
-# ============================================================
-
 class ASLPredictor:
     """ASL alphabet prediction using trained PyTorch model."""
     
@@ -290,35 +250,22 @@ class ASLPredictor:
         self.prediction_history = deque(maxlen=SMOOTHING_WINDOW)
     
     def preprocess(self, image):
-        """Preprocess image for model input."""
-        # Convert BGR to RGB
         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        # Apply transforms
         tensor = inference_transforms(rgb)
-        # Add batch dimension
         batch = tensor.unsqueeze(0).to(DEVICE)
         return batch
     
     @torch.no_grad()
     def predict(self, image):
-        """
-        Make prediction on image.
-        Returns: (predicted_class, confidence, all_probabilities)
-        """
         preprocessed = self.preprocess(image)
-        
-        # Get model output
         outputs = self.model(preprocessed)
         probabilities = F.softmax(outputs, dim=1)[0]
         
-        # Get top prediction
         confidence, pred_idx = torch.max(probabilities, dim=0)
         predicted_class = CLASS_NAMES[pred_idx.item()]
         
-        # Add to history for smoothing
         self.prediction_history.append(pred_idx.item())
         
-        # Smooth predictions using majority voting
         if len(self.prediction_history) >= 3:
             most_common_idx = Counter(self.prediction_history).most_common(1)[0][0]
             smoothed_class = CLASS_NAMES[most_common_idx]
@@ -330,13 +277,8 @@ class ASLPredictor:
         return smoothed_class, smoothed_confidence, probabilities.cpu().numpy()
     
     def reset_history(self):
-        """Clear prediction history."""
         self.prediction_history.clear()
 
-
-# ============================================================
-# SENTENCE BUILDER
-# ============================================================
 
 class SentenceBuilder:
     """Builds sentences from predicted ASL letters with stability filtering."""
@@ -351,41 +293,31 @@ class SentenceBuilder:
         self.last_added = None
     
     def update(self, predicted_letter, confidence):
-        """
-        Update sentence based on new prediction.
-        Returns: (letter_added, current_sentence)
-        """
         letter_added = None
         
-        # Cooldown period after adding a letter
         if self.cooldown_counter > 0:
             self.cooldown_counter -= 1
             return None, self.sentence
         
-        # Ignore low confidence or 'nothing'
         if confidence < CONFIDENCE_THRESHOLD or predicted_letter.lower() == 'nothing':
             self.current_letter = None
             self.letter_count = 0
             return None, self.sentence
         
-        # Check if same letter is being held
         if predicted_letter == self.current_letter:
             self.letter_count += 1
             
-            # Letter is stable enough - add to sentence
             if self.letter_count >= self.stability_threshold:
                 letter_added = self._add_letter(predicted_letter)
                 self.letter_count = 0
                 self.cooldown_counter = self.cooldown_threshold
         else:
-            # New letter detected
             self.current_letter = predicted_letter
             self.letter_count = 1
         
         return letter_added, self.sentence
     
     def _add_letter(self, letter):
-        """Add a letter to the sentence."""
         if letter.lower() == 'space':
             self.sentence += ' '
             self.last_added = '[SPACE]'
@@ -401,80 +333,63 @@ class SentenceBuilder:
             return letter.upper()
     
     def add_space(self):
-        """Manually add a space."""
         self.sentence += ' '
         self.last_added = '[SPACE]'
     
     def delete_last(self):
-        """Delete the last character."""
         if len(self.sentence) > 0:
             self.sentence = self.sentence[:-1]
             self.last_added = '[DEL]'
     
     def clear(self):
-        """Clear the entire sentence."""
         self.sentence = ""
         self.current_letter = None
         self.letter_count = 0
         self.last_added = None
     
     def get_progress(self):
-        """Get progress towards next letter (0.0 to 1.0)."""
         if self.current_letter and self.cooldown_counter == 0:
             return min(1.0, self.letter_count / self.stability_threshold)
         return 0.0
 
-
-# ============================================================
-# UI RENDERER
-# ============================================================
 
 class UIRenderer:
     """Renders the user interface overlays."""
     
     @staticmethod
     def draw_hand_box(frame, box, color=(0, 255, 0), thickness=3):
-        """Draw bounding box around detected hand."""
         x, y, w, h = box
         cv2.rectangle(frame, (x, y), (x + w, y + h), color, thickness)
     
     @staticmethod
     def draw_prediction(frame, prediction, confidence, x, y):
-        """Draw prediction text with confidence."""
         text = f"{prediction}: {confidence*100:.1f}%"
         (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 2)
         
-        # Background
         cv2.rectangle(frame, (x-5, y-text_h-10), (x+text_w+5, y+5), (0, 0, 0), -1)
         
-        # Color based on confidence
         if confidence >= 0.8:
-            color = (0, 255, 0)  # Green
+            color = (0, 255, 0)
         elif confidence >= 0.6:
-            color = (0, 255, 255)  # Yellow
+            color = (0, 255, 255)
         else:
-            color = (0, 165, 255)  # Orange
+            color = (0, 165, 255)
         
         cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 2)
     
     @staticmethod
     def draw_sentence_box(frame, sentence, y_position):
-        """Draw the sentence builder box at bottom of frame."""
         h, w = frame.shape[:2]
         
-        # Background box
         box_height = 80
         cv2.rectangle(frame, (10, y_position), (w-10, y_position + box_height), (40, 40, 40), -1)
         cv2.rectangle(frame, (10, y_position), (w-10, y_position + box_height), (100, 100, 100), 2)
         
-        # Label
         cv2.putText(frame, "Sentence:", (20, y_position + 25), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (150, 150, 150), 1)
         
-        # Sentence text (with cursor)
         display_sentence = sentence + "_"
         
-        # Truncate if too long
         max_chars = 50
         if len(display_sentence) > max_chars:
             display_sentence = "..." + display_sentence[-(max_chars-3):]
@@ -484,46 +399,38 @@ class UIRenderer:
     
     @staticmethod
     def draw_progress_bar(frame, progress, x, y, width=200, height=12):
-        """Draw progress bar for letter confirmation."""
-        # Background
         cv2.rectangle(frame, (x, y), (x + width, y + height), (50, 50, 50), -1)
         
-        # Progress fill
         if progress > 0:
             progress_width = int(width * progress)
             if progress < 0.5:
-                color = (0, 255, 255)  # Yellow
+                color = (0, 255, 255)
             elif progress < 0.8:
-                color = (0, 200, 100)  # Yellow-green
+                color = (0, 200, 100)
             else:
-                color = (0, 255, 0)  # Green
+                color = (0, 255, 0)
             cv2.rectangle(frame, (x, y), (x + progress_width, y + height), color, -1)
         
-        # Border
         cv2.rectangle(frame, (x, y), (x + width, y + height), (100, 100, 100), 1)
     
     @staticmethod
     def draw_instructions(frame):
-        """Draw control instructions."""
         instructions = "Q:Quit | C:Clear | SPACE:Space | BACKSPACE:Del | S:Screenshot | R:Reset"
         cv2.putText(frame, instructions, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
     
     @staticmethod
     def draw_status(frame, status_text, color=(0, 255, 0)):
-        """Draw status message."""
         h, w = frame.shape[:2]
         cv2.putText(frame, status_text, (w - 250, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
     
     @staticmethod
     def draw_feedback(frame, letter):
-        """Draw feedback when a letter is added."""
         h, w = frame.shape[:2]
         text = f"+ {letter}"
         cv2.putText(frame, text, (w//2 - 60, h//2), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 0), 4)
     
     @staticmethod
     def draw_top_predictions(frame, probabilities, x, y, top_n=5):
-        """Draw top N predictions as horizontal bars."""
         top_indices = np.argsort(probabilities)[-top_n:][::-1]
         
         bar_width = 120
@@ -546,12 +453,8 @@ class UIRenderer:
             
             label = f"{class_name}: {conf*100:.0f}%"
             cv2.putText(frame, label, (x + bar_width + 10, bar_y + 13),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
 
-
-# ============================================================
-# MAIN APPLICATION
-# ============================================================
 
 def main():
     """Main application entry point."""
@@ -563,7 +466,6 @@ def main():
     if DEVICE.type == 'cuda':
         print(f"GPU: {torch.cuda.get_device_name(0)}")
     
-    # Check if model exists
     if not os.path.exists(MODEL_PATH):
         print(f"\nModel not found: {MODEL_PATH}")
         print("\nPlease update MODEL_PATH to your saved model location.")
@@ -572,10 +474,9 @@ def main():
         if pth_files:
             print(f"\nAvailable .pth files:")
             for f in pth_files:
-                print(f"  • {f}")
+                print(f"  * {f}")
         return
     
-    # Initialize components
     print("\nInitializing components...")
     model = load_model(MODEL_PATH, MODEL_TYPE, NUM_CLASSES)
     hand_detector = HandDetector(max_hands=1, detection_confidence=0.7)
@@ -583,7 +484,6 @@ def main():
     sentence_builder = SentenceBuilder()
     ui = UIRenderer()
     
-    # Open webcam
     print("Opening webcam...")
     cap = cv2.VideoCapture(0)
     
@@ -606,7 +506,6 @@ def main():
     print("  R         - Reset prediction history")
     print("-"*60)
     
-    # State
     feedback_letter = None
     feedback_frames = 0
     fps_counter = 0
@@ -622,7 +521,6 @@ def main():
         frame = cv2.flip(frame, 1)
         h, w = frame.shape[:2]
         
-        # Detect hands
         frame, hand_boxes = hand_detector.find_hands(frame, draw=True)
         
         current_prediction = None
@@ -651,16 +549,13 @@ def main():
             ui.draw_status(frame, "No hand detected", (0, 165, 255))
             predictor.reset_history()
         
-        # Feedback
         if feedback_frames > 0 and feedback_letter:
             ui.draw_feedback(frame, feedback_letter)
             feedback_frames -= 1
         
-        # Sentence box
         ui.draw_sentence_box(frame, sentence_builder.sentence, h - 100)
         ui.draw_instructions(frame)
         
-        # FPS
         fps_counter += 1
         if time.time() - fps_start_time >= 1.0:
             current_fps = fps_counter
@@ -681,22 +576,21 @@ def main():
         elif key == ord('c') or key == ord('C'):
             sentence_builder.clear()
             predictor.reset_history()
-            print("🗑️ Sentence cleared")
+            print("Sentence cleared")
         elif key == ord(' '):
             sentence_builder.add_space()
-            print("➕ Space added")
-        elif key == 8:  # Backspace
+            print("Space added")
+        elif key == 8:
             sentence_builder.delete_last()
-            print("⬅️ Character deleted")
+            print("Character deleted")
         elif key == ord('s') or key == ord('S'):
             filename = f"screenshot_{int(time.time())}.png"
             cv2.imwrite(filename, frame)
-            print(f"📸 Screenshot saved: {filename}")
+            print(f"Screenshot saved: {filename}")
         elif key == ord('r') or key == ord('R'):
             predictor.reset_history()
-            print("🔄 Prediction history reset")
+            print("Prediction history reset")
     
-    # Cleanup
     cap.release()
     cv2.destroyAllWindows()
     hand_detector.release()
@@ -706,10 +600,6 @@ def main():
     print(f'   "{sentence_builder.sentence}"')
     print("="*60)
 
-
-# ============================================================
-# SIMPLE MODE (No MediaPipe - Manual ROI)
-# ============================================================
 
 def main_simple():
     """Simple version with manual ROI box (no MediaPipe required)."""
@@ -750,7 +640,6 @@ def main_simple():
         frame = cv2.flip(frame, 1)
         h, w = frame.shape[:2]
         
-        # ROI box
         cv2.rectangle(frame, (roi_x, roi_y), (roi_x + roi_size, roi_y + roi_size), (0, 255, 0), 3)
         cv2.putText(frame, "Place hand here", (roi_x, roi_y - 10),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
@@ -768,20 +657,17 @@ def main_simple():
                    (roi_x, roi_y + roi_size + 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
         
-        # Progress
         progress = sentence_builder.get_progress()
         bar_y = roi_y + roi_size + 50
         cv2.rectangle(frame, (roi_x, bar_y), (roi_x + roi_size, bar_y + 10), (50, 50, 50), -1)
         if progress > 0:
             cv2.rectangle(frame, (roi_x, bar_y), (roi_x + int(roi_size * progress), bar_y + 10), (0, 255, 0), -1)
         
-        # Feedback
         if feedback_frames > 0:
             cv2.putText(frame, f"+ {feedback_letter}", (w//2 - 50, h//2),
                        cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 3)
             feedback_frames -= 1
         
-        # Sentence
         cv2.rectangle(frame, (10, h - 80), (w - 10, h - 10), (40, 40, 40), -1)
         cv2.putText(frame, "Sentence:", (20, h - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
         display = sentence_builder.sentence + "_"
@@ -808,10 +694,6 @@ def main_simple():
     cv2.destroyAllWindows()
     print(f'\nFinal sentence: "{sentence_builder.sentence}"')
 
-
-# ============================================================
-# ENTRY POINT
-# ============================================================
 
 if __name__ == "__main__":
     import sys

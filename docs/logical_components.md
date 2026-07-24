@@ -93,9 +93,9 @@ The system is organized into 14 logical components grouped by responsibility dom
 
 ### 2.1 ModelRegistry
 
-**Location**: `src/inference/__init__.py` (load_model function + model classes)
+**Location**: `api/services/predictor.py` (ModelRegistry class + CustomCNN)
 
-**Responsibility**: Defines, instantiates, and loads trained model architectures.
+**Responsibility**: Defines, instantiates, and loads trained model architectures via strategy pattern. For web API (ONNX Runtime), the registry is self-contained in the predictor module. For local inference (PyTorch), `load_model()` in `src/inference/__init__.py` provides the same interface.
 
 **Registered models**:
 

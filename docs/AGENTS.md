@@ -25,7 +25,7 @@ api/                            ← Web API service
   Dockerfile
 frontend/                       ← Browser client (MediaPipe JS + vanilla JS)
 notebooks/ASL_PyTorch_Complete.ipynb ← Training
-outputs/models/                 ← Trained checkpoints (.pth)
+outputs/models/                 ← Trained checkpoints (.pth) and ONNX exports (.onnx)
 outputs/metrics/                ← Training metrics
 ```
 

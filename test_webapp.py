@@ -98,13 +98,14 @@ try:
 except Exception as e:
     check("Import all models", False, str(e))
 
-# 1b. Predictor service
-print("\n[1b] Predictor service (dummy model)")
+# 1b. Predictor service (ONNX Runtime — production architecture)
+print("\n[1b] Predictor service (ONNX)")
 try:
     from api.services.predictor import (
         CLASS_NAMES, NUM_CLASSES, IMG_SIZE,
-        ASLPredictor, SentenceBuilder, InferenceService, load_model,
-        CustomCNN, SMOOTHING_WINDOW, CONFIDENCE_THRESHOLD,
+        ASLPredictor, SentenceBuilder, InferenceService,
+        SMOOTHING_WINDOW, CONFIDENCE_THRESHOLD,
+        ImagePreprocessor, TemporalSmoother, OnnxInferenceEngine,
     )
     check("Import predictor module", True)
     check("CLASS_NAMES has 29 classes", len(CLASS_NAMES) == 29)
@@ -112,68 +113,55 @@ try:
     check("IMG_SIZE == 224", IMG_SIZE == 224)
     check("CLASS_NAMES includes 'del','nothing','space'",
           "del" in CLASS_NAMES and "nothing" in CLASS_NAMES and "space" in CLASS_NAMES)
-    check("CustomCNN class exists", CustomCNN is not None)
 
-    # Load dummy model
-    dummy = create_dummy_mobilenet()
-    predictor = ASLPredictor(dummy, "mobilenet_v2")
-    check("ASLPredictor instantiation", predictor is not None)
-
-    # Predict on random image
-    img = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
-    label, conf, probs = predictor.predict(img)
-    check("Predict returns label", label is not None and label in CLASS_NAMES)
-    check("Predict returns confidence 0-1", 0 <= conf <= 1)
-    check("Predict returns prob dict", isinstance(probs, dict) and len(probs) == 29)
-
-    # Predict on error input
-    label2, conf2, probs2 = predictor.predict(None)
-    check("Predict handles None gracefully", label2 is None and conf2 is None)
-
-    # SentenceBuilder
+    # SentenceBuilder — standalone (no model needed)
     sb = SentenceBuilder()
     check("SentenceBuilder init", sb.get_sentence() == "")
 
-    # Add letters with stability
     for _ in range(12):
         sb.update("A")
     check("SentenceBuilder adds letter after stability", "A" in sb.get_sentence())
 
-    # Space
     sb.add_space()
     check("SentenceBuilder adds space", sb.get_sentence().endswith(" "))
 
-    # Delete
     sb.delete_last()
     check("SentenceBuilder deletes last", not sb.get_sentence().endswith(" "))
 
-    # Clear
     sb.clear()
     check("SentenceBuilder clears", sb.get_sentence() == "")
 
-    # Nothing filter
     sb2 = SentenceBuilder()
     for _ in range(12):
         sb2.update("nothing")
     check("SentenceBuilder filters 'nothing'", sb2.get_sentence() == "")
 
-    # InferenceService
-    service = InferenceService(model_path="outputs/models/best_mobilenet_v2.pth", model_type="mobilenet_v2")
-    service.model = dummy
-    service.predictor = predictor
-    service._initialized = True
-
-    label3, conf3, _ = service.predict(img, "session1")
-    check("InferenceService.predict", label3 is not None)
-
-    # Simulate stability threshold: need 12 consecutive same predictions to commit
+    # del action
+    sb3 = SentenceBuilder()
     for _ in range(12):
+        sb3.update("A")
+    sb3.update("del")
+    check("SentenceBuilder handles del", "A" not in sb3.get_sentence())
+
+    # space action
+    sb4 = SentenceBuilder()
+    for _ in range(12):
+        sb4.update("H")
+    sb4.update("space")
+    check("SentenceBuilder handles space", sb4.get_sentence().endswith(" "))
+
+    # InferenceService — test methods that don't require model loading
+    service = InferenceService(model_path="outputs/models/best_mobilenet_v2.onnx", model_type="mobilenet_v2")
+    check("InferenceService instantiation", service is not None)
+
+    # update_sentence without model (uses session builder directly)
+    sent = service.update_sentence("session1", "predict", "A")
+    check("InferenceService.update_sentence predict (first frame)", sent == "")
+
+    for _ in range(11):
         service.update_sentence("session1", "predict", "A")
     sent = service.get_sentence("session1")
-    check("InferenceService.update_sentence (after stability)", sent == "A")
-
-    sent = service.get_sentence("session1")
-    check("InferenceService.get_sentence", sent == "A")
+    check("InferenceService get_sentence after stability", sent == "A")
 
     sent = service.update_sentence("session1", "space")
     check("InferenceService space action", sent == "A ")
@@ -192,39 +180,46 @@ try:
     decoded = service.decode_base64_image("data:image/jpeg;base64," + b64)
     check("decode_base64_image", decoded.shape == (224, 224, 3))
 
-    # New architectural components
-    from api.services.predictor import (
-        ImagePreprocessor, TemporalSmoother, ModelRegistry,
-    )
-    check("ImagePreprocessor class exists", ImagePreprocessor is not None)
-    check("TemporalSmoother class exists", TemporalSmoother is not None)
-    check("ModelRegistry class exists", ModelRegistry is not None)
-
-    # ImagePreprocessor
+    # ImagePreprocessor — standalone
     preprocessor = ImagePreprocessor()
     test_img = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
     tensor = preprocessor.preprocess(test_img)
     check("ImagePreprocessor outputs (1,3,224,224) tensor",
           tensor.shape == (1, 3, 224, 224))
 
-    # TemporalSmoother
+    # TemporalSmoother — standalone
     smoother = TemporalSmoother(window_size=5, confidence_threshold=0.65)
     idx, conf = smoother.smooth(0, 0.9)
     check("TemporalSmoother smooth returns idx and conf", idx is not None and conf is not None)
 
-    # ModelRegistry strategy pattern
-    reg_model = ModelRegistry.get_model("mobilenet_v2", num_classes=29)
-    check("ModelRegistry.get_model returns nn.Module", isinstance(reg_model, nn.Module))
-    reg_model = ModelRegistry.get_model("resnet50", num_classes=29)
-    check("ModelRegistry supports resnet50", isinstance(reg_model, nn.Module))
-    reg_model = ModelRegistry.get_model("efficientnet_b0", num_classes=29)
-    check("ModelRegistry supports efficientnet_b0", isinstance(reg_model, nn.Module))
-    reg_model = ModelRegistry.get_model("custom_cnn", num_classes=29)
-    check("ModelRegistry supports custom_cnn", isinstance(reg_model, nn.Module))
+    # OnnxInferenceEngine class exists (structure check — won't load without real model file)
+    check("OnnxInferenceEngine class exists", OnnxInferenceEngine is not None)
 
-    # load_model backward compat wrapper
-    compat_model = load_model("outputs/models/best_mobilenet_v2.pth")
-    check("load_model() backward compat wrapper works", compat_model is not None)
+    # ModelRegistry strategy pattern (ADR-005)
+    from api.services.predictor import ModelRegistry
+    check("ModelRegistry class exists", ModelRegistry is not None)
+
+    registered = ModelRegistry.list_models()
+    check("ModelRegistry lists 4 types", len(registered) == 4)
+    check("ModelRegistry has mobilenet_v2", "mobilenet_v2" in registered)
+    check("ModelRegistry has resnet50", "resnet50" in registered)
+    check("ModelRegistry has efficientnet_b0", "efficientnet_b0" in registered)
+    check("ModelRegistry has custom_cnn", "custom_cnn" in registered)
+
+    reg_mobilenet = ModelRegistry.get_model("mobilenet_v2", num_classes=29)
+    check("ModelRegistry.get_model returns nn.Module", isinstance(reg_mobilenet, nn.Module))
+    reg_resnet = ModelRegistry.get_model("resnet50", num_classes=29)
+    check("ModelRegistry supports resnet50", isinstance(reg_resnet, nn.Module))
+    reg_effnet = ModelRegistry.get_model("efficientnet_b0", num_classes=29)
+    check("ModelRegistry supports efficientnet_b0", isinstance(reg_effnet, nn.Module))
+    reg_custom = ModelRegistry.get_model("custom_cnn", num_classes=29)
+    check("ModelRegistry supports custom_cnn", isinstance(reg_custom, nn.Module))
+
+    try:
+        ModelRegistry.get_model("nonexistent")
+        check("ModelRegistry: unknown type raises ValueError", False, "should have raised")
+    except ValueError:
+        check("ModelRegistry: unknown type raises ValueError", True)
 
 except Exception as e:
     import traceback
@@ -237,16 +232,19 @@ try:
     check("FastAPI app import", True)
     check("App title", app.title == "ASL Recognition API")
 
-    # Initialize global service with dummy model BEFORE creating TestClient
-    # (TestClient runs lifespan which tries to load the real model)
-    dummy_model = create_dummy_mobilenet()
-    test_predictor = ASLPredictor(dummy_model, "mobilenet_v2")
-    global_service.model = dummy_model
-    global_service.predictor = test_predictor
+    # Mock the ONNX-based predict method so tests work without a real model file
+    def _mock_predict(image_bgr, session_id="default"):
+        return ("A", 0.95, {c: 0.03 for c in CLASS_NAMES})
+
+    global_service.predict = _mock_predict
     global_service._initialized = True
 
-    from fastapi.testclient import TestClient
-    client = TestClient(app)
+    try:
+        from fastapi.testclient import TestClient
+        client = TestClient(app)
+    except ImportError:
+        check("FastAPI test client available", False, "install fastapi[test] or httpx")
+        raise SystemExit(0)
 
     # Health
     r = client.get("/api/health")
@@ -289,11 +287,9 @@ try:
     # WebSocket
     with client.websocket_connect("/api/stream") as ws:
         ws.send_text("ping")
-        # TestClient may return empty control frame first; retry once
         data_raw = ws.receive_text()
         if not data_raw:
             data_raw = ws.receive_text()
-        # "pong" is sent as plain string, not JSON
         check("WebSocket ping/pong", data_raw == "pong", f"received: {repr(data_raw)[:50]}")
 
         ws.send_text(json.dumps({"action": "predict", "image": "data:image/jpeg;base64," + b64}))

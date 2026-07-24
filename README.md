@@ -89,11 +89,14 @@ The web deployment splits the pipeline between browser and server:
 
 | Client (Browser) | Server (API) |
 |-----------------|--------------|
-| Camera capture (`getUserMedia`) | Image preprocessing |
-| Hand detection (MediaPipe Hands JS) | CNN inference (PyTorch) |
-| ROI crop (canvas) | Temporal smoothing |
-| DOM rendering | Sentence accumulation |
+| Camera capture (`getUserMedia`) | Image preprocessing (`ImagePreprocessor`) |
+| Hand detection (MediaPipe Hands JS) | CNN inference (ONNX Runtime) |
+| ROI crop (canvas) | Temporal smoothing (`TemporalSmoother`) |
+| DOM rendering | Sentence accumulation (`SentenceBuilder`) |
 | | WebSocket streaming |
+
+Single-container deployment: the API serves the frontend via FastAPI `StaticFiles` (no separate nginx needed for Render).
+Multi-container deployment: Docker Compose with separate `api` (FastAPI) and `frontend` (nginx) services.
 
 API endpoints: `/api/predict`, `/api/update`, `/api/sentence/*`, `/api/stream` (WebSocket).
 See [`docs/AGENTS.md`](docs/AGENTS.md) for full endpoint reference.
@@ -122,7 +125,7 @@ See [`docs/AGENTS.md`](docs/AGENTS.md) for full endpoint reference.
 ├── generate_models.py   # Generate model weights from LFS pointers
 ├── docker-compose.yml   # Service orchestration
 ├── test_webapp.py       # 115 unit/integration tests
-└── test_edge_cases.py   # 37 edge case tests
+└── test_edge_cases.py   # 60 edge case tests
 ```
 
 ## Architecture

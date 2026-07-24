@@ -230,7 +230,7 @@ Design for **local-first inference** with all processing (hand detection, image 
 - No centralized analytics or usage telemetry
 - Web deployment requires architectural refactoring to separate capture from inference
 
-**Mitigation**: Web deployment path documented in architectural characteristics; inference logic is already modularized into independent classes (HandDetector, ASLPredictor, SentenceBuilder) that can be reassembled as an API service.
+**Mitigation**: Web deployment path is implemented. The API service (`api/services/predictor.py`) provides ONNX Runtime inference with session-based sentence building. Browser client handles stages 1-3 (capture, detection, ROI) via MediaPipe JS. Single-container deployment on Render via FastAPI + StaticFiles.
 
 ---
 

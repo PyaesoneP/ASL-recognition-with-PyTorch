@@ -3,9 +3,11 @@
 import cv2
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from api.models import (
     PredictRequest,
@@ -53,6 +55,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve frontend static files (for single-container deployment on Render)
+_frontend_path = Path(__file__).resolve().parents[2] / "frontend"
+if _frontend_path.exists():
+    app.mount("/", StaticFiles(directory=str(_frontend_path), html=True), name="frontend")
 
 
 @app.get("/api/health", response_model=HealthResponse)
