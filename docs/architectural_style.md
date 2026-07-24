@@ -134,27 +134,27 @@ This separation enables:
 
 ---
 
-## Mapping to Future Web Deployment
+## Web Deployment (Implemented)
 
-The pipeline architecture maps naturally to a client-server web deployment:
+The pipeline architecture maps to a client-server web deployment:
 
 ### Client-Side (Browser)
 
-| Current Stage | Web Equivalent |
-|--------------|---------------|
+| Stage | Implementation |
+|-------|---------------|
 | Stage 1: Capture | Browser `getUserMedia()` / WebRTC |
-| Stage 2: Hand Detection | MediaPipe in-browser (JavaScript) |
+| Stage 2: Hand Detection | MediaPipe Hands JS |
 | Stage 3: ROI Extraction | Canvas crop in browser |
 | Stage 8: Rendering | HTML/CSS overlay on video element |
 
 ### Server-Side (API)
 
-| Current Stage | Web Equivalent |
-|--------------|---------------|
-| Stage 4: Preprocessing | Server-side transform (or skip if client sends tensor) |
-| Stage 5: Classification | TorchScript / ONNX Runtime endpoint |
-| Stage 6: Temporal Smoothing | Server-side stateful smoothing (preserves consistency) |
-| Stage 7: Output Formatting | Server-side sentence accumulation |
+| Stage | Implementation |
+|-------|---------------|
+| Stage 4: Preprocessing | `ImagePreprocessor` (ONNX-compatible transforms) |
+| Stage 5: Classification | `OnnxInferenceEngine` + `ASLPredictor` (ONNX Runtime) |
+| Stage 6: Temporal Smoothing | `TemporalSmoother` (server-side stateful) |
+| Stage 7: Output Formatting | `SentenceBuilder` (session-based) |
 
 ### Communication
 
@@ -166,6 +166,13 @@ Browser ←───────────────────────
 ```
 
 The pipeline's stage boundaries align with natural API boundaries. Stages 1-3 move to the client (reducing bandwidth), while Stages 4-7 remain server-side (protecting the model).
+
+### Deployment Modes
+
+| Mode | Architecture | Use Case |
+|------|-------------|----------|
+| Single-container | FastAPI + StaticFiles (Render) | Simple deployment, one service |
+| Multi-container | Docker Compose (api + nginx) | Development, separate scaling |
 
 ---
 
@@ -225,4 +232,4 @@ Each pipeline stage is implemented as a reusable component with:
 
 ### Strategy Pattern (model selection)
 
-`ModelRegistry.load_model()` implements a strategy pattern: the same loading interface works for any registered model type. The `MODEL_TYPE` config value selects which strategy (architecture) to instantiate.
+`ModelRegistry.get_model()` implements a strategy pattern: the same loading interface works for any registered model type. The `MODEL_TYPE` config value selects which strategy (architecture) to instantiate. Registered models: `mobilenet_v2`, `resnet50`, `efficientnet_b0`, `custom_cnn`.

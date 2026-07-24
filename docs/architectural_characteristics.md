@@ -14,7 +14,8 @@ Webcam Feed → Hand Detection (MediaPipe) → ROI Crop → CNN Inference → Te
 |-------|-----------|----------------|
 | Data Collection | `src/scripts/capture_asl_images.py` | Interactive and batch image capture for dataset building |
 | Training | Jupyter notebook (`notebooks/ASL_PyTorch_Complete.ipynb`) | Model training with augmentation, validation, and metrics |
-| Inference | `src/inference/__init__.py` | Live gesture-to-text recognition pipeline |
+| Inference (local) | `src/inference/__init__.py` | Desktop webcam gesture-to-text pipeline (MediaPipe + PyTorch) |
+| Inference (web API) | `api/services/predictor.py` | ONNX Runtime inference service (self-contained, server-safe) |
 | Configuration | `src/config/settings.py` | Centralized model paths, dataset paths, prediction parameters |
 
 ## 2. Core Non-Functional Requirements
@@ -175,10 +176,12 @@ Raw Frame → MediaPipe Hand Detection → Landmark-based ROI Crop (25% padding)
 
 ### Web Application Path
 
-- Inference logic to be containerized and exposed via API
-- Webcam capture moves to client-side (browser MediaPipe or WebRTC)
-- Model served via ONNX Runtime or TorchScript for optimized inference
+- Inference logic containerized in `api/` (FastAPI + ONNX Runtime)
+- Webcam capture moves to client-side (browser MediaPipe Hands JS)
+- Model served via ONNX Runtime (optimized CPU inference)
 - Temporal smoothing preserved server-side for consistent behavior
+- Single-container deployment: API serves frontend via `StaticFiles` (Render-compatible)
+- Docker Compose: separate `api` and `frontend` (nginx) services
 
 ## 8. Future Scope
 
