@@ -2,10 +2,11 @@
 
 import cv2
 import os
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -49,10 +50,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS: allow_credentials must be False when origins is the wildcard, otherwise
+# the API would echo any Origin back with credentials allowed. Set ALLOWED_ORIGINS
+# (comma-separated) to lock this down to your own domain(s).
+_origins_env = os.getenv("ALLOWED_ORIGINS", "*").strip()
+_allowed_origins = ["*"] if _origins_env == "*" else [o.strip() for o in _origins_env.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_allowed_origins,
+    allow_credentials=_allowed_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -135,6 +141,7 @@ async def update(request: UpdateRequest):
         session_id=request.session_id,
         action="predict",
         prediction=request.class_label,
+        confidence=request.confidence,
     )
     # Determine if a letter was actually added (sentence grew)
     added_letter = None
@@ -151,7 +158,9 @@ async def update(request: UpdateRequest):
 @app.websocket("/api/stream")
 async def stream(websocket: WebSocket):
     await websocket.accept()
-    session_id = "default"
+    # Unique per-connection session so concurrent clients don't share one
+    # sentence/smoother. Evicted on disconnect (see finally).
+    session_id = uuid.uuid4().hex
 
     try:
         while True:
@@ -201,7 +210,7 @@ async def stream(websocket: WebSocket):
                         label, confidence, _ = service.predict(image_bgr, session_id)
 
                         if label and label != "nothing":
-                            service.update_sentence(session_id, "predict", label)
+                            service.update_sentence(session_id, "predict", label, confidence)
 
                         sentence = service.get_sentence(session_id)
                         await websocket.send_text(json.dumps({
@@ -228,3 +237,5 @@ async def stream(websocket: WebSocket):
     except Exception as e:
         print(f"WebSocket error: {e}")
         await websocket.close()
+    finally:
+        service.remove_session(session_id)
