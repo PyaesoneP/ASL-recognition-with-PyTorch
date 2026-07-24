@@ -14,7 +14,7 @@ Architecture compliance:
 import base64
 import io
 import os
-from collections import deque
+from collections import deque, OrderedDict
 from typing import Optional, Tuple
 import numpy as np
 import onnxruntime as ort
@@ -60,6 +60,11 @@ NUM_CLASSES = 29
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
+
+# Bounds on decoded images from public/unauthenticated endpoints (DoS guard).
+MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", 6 * 1024 * 1024))   # 6 MB
+MAX_IMAGE_PIXELS = int(os.getenv("MAX_IMAGE_PIXELS", 4096 * 4096))
+Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS   # PIL raises DecompressionBombError past 2x
 
 # ---------------------------------------------------------------------------
 # CustomCNN — lightweight 4-block CNN (trained from scratch)
@@ -257,7 +262,7 @@ class ASLPredictor:
             confidence_threshold=confidence_threshold,
         )
 
-    def predict(self, image_bgr: np.ndarray) -> Tuple[Optional[str], Optional[float], Optional[dict]]:
+    def predict(self, image_bgr: np.ndarray, smoother: "TemporalSmoother" = None) -> Tuple[Optional[str], Optional[float], Optional[dict]]:
         try:
             # Stage 4: Preprocessing
             preprocessor = ImagePreprocessor(img_size=self.img_size)
@@ -271,8 +276,9 @@ class ASLPredictor:
             top_idx = int(np.argmax(probs))
             top_conf = float(probs[top_idx])
 
-            # Stage 6: Temporal smoothing
-            top_idx, top_conf = self.smoother.smooth(top_idx, top_conf)
+            # Stage 6: Temporal smoothing (per-session smoother when provided)
+            sm = smoother if smoother is not None else self.smoother
+            top_idx, top_conf = sm.smooth(top_idx, top_conf)
 
             label = CLASS_NAMES[top_idx]
             prob_dict = {CLASS_NAMES[i]: round(float(probs[i]), 4)
@@ -293,16 +299,18 @@ class SentenceBuilder:
     cooldown, del/space handling.
     """
     def __init__(self, stability_frames: int = STABILITY_FRAMES,
-                 cooldown_frames: int = COOLDOWN_FRAMES):
+                 cooldown_frames: int = COOLDOWN_FRAMES,
+                 confidence_threshold: float = CONFIDENCE_THRESHOLD):
         self.sentence = ""
         self.last_added_frame = -1
         self.stability_count = 0
         self.stability_threshold = stability_frames
         self.cooldown_frames = cooldown_frames
+        self.confidence_threshold = confidence_threshold
         self.current_letter = None
         self.frame_counter = 0
 
-    def update(self, predicted_class: str, confidence: float = 0.0) -> Optional[str]:
+    def update(self, predicted_class: str, confidence: float = 1.0) -> Optional[str]:
         self.frame_counter += 1
 
         if predicted_class == "del":
@@ -314,15 +322,18 @@ class SentenceBuilder:
         elif predicted_class == "nothing":
             return None
 
+        # Confidence gate — makes CONFIDENCE_THRESHOLD meaningful. Predictions
+        # below threshold don't advance stability (default 1.0 so callers that
+        # don't supply a confidence still commit).
+        if confidence < self.confidence_threshold:
+            return None
+
+        # Stability counting: a sign must be held for stability_threshold
+        # consecutive frames before it commits. (The old cooldown branch here
+        # was dead code — both arms were identical — so it's removed.)
         if self.current_letter != predicted_class:
-            if (self.current_letter is not None
-                    and self.frame_counter - self.last_added_frame
-                    >= self.cooldown_frames):
-                self.current_letter = predicted_class
-                self.stability_count = 1
-            else:
-                self.current_letter = predicted_class
-                self.stability_count = 1
+            self.current_letter = predicted_class
+            self.stability_count = 1
         else:
             self.stability_count += 1
 
@@ -474,7 +485,10 @@ class InferenceService:
         self.stability_frames = stability_frames
         self.cooldown_frames = cooldown_frames
         self.engine = None
-        self._sentence_builders: dict = {}
+        # Per-session state (SentenceBuilder + TemporalSmoother), LRU-capped so
+        # unbounded client-supplied session_ids can't exhaust memory.
+        self._sessions: "OrderedDict[str, dict]" = OrderedDict()
+        self._max_sessions = int(os.getenv("MAX_SESSIONS", 512))
         self._initialized = False
 
     def initialize(self):
@@ -492,13 +506,15 @@ class InferenceService:
     def predict(self, image_bgr, session_id: str = "default"):
         if not self._initialized:
             self.initialize()
-        return self.predictor.predict(image_bgr)
+        session = self._get_session(session_id)
+        return self.predictor.predict(image_bgr, smoother=session["smoother"])
 
     def update_sentence(self, session_id: str, action: str = "predict",
-                        prediction: Optional[str] = None) -> str:
+                        prediction: Optional[str] = None,
+                        confidence: float = 1.0) -> str:
         if not self._initialized:
             self.initialize()
-        builder = self._get_session_builder(session_id)
+        builder = self._get_session(session_id)["builder"]
         if action == "clear":
             builder.clear()
         elif action == "space":
@@ -506,27 +522,52 @@ class InferenceService:
         elif action == "del":
             builder.delete_last()
         elif action == "predict" and prediction:
-            builder.update(prediction)
+            builder.update(prediction, confidence)
         return builder.get_sentence()
 
     def get_sentence(self, session_id: str = "default") -> str:
         """Retrieve the current sentence for a given session."""
         if not self._initialized:
             self.initialize()
-        builder = self._get_session_builder(session_id)
-        return builder.get_sentence()
+        return self._get_session(session_id)["builder"].get_sentence()
 
-    def _get_session_builder(self, session_id: str) -> SentenceBuilder:
-        if session_id not in self._sentence_builders:
-            self._sentence_builders[session_id] = SentenceBuilder()
-        return self._sentence_builders[session_id]
+    def _get_session(self, session_id: str) -> dict:
+        session = self._sessions.get(session_id)
+        if session is None:
+            session = {
+                "builder": SentenceBuilder(),
+                "smoother": TemporalSmoother(
+                    window_size=self.smoothing_window,
+                    confidence_threshold=self.confidence_threshold,
+                ),
+            }
+            self._sessions[session_id] = session
+            # Evict least-recently-used sessions past the cap.
+            while len(self._sessions) > self._max_sessions:
+                self._sessions.popitem(last=False)
+        else:
+            self._sessions.move_to_end(session_id)
+        return session
+
+    def remove_session(self, session_id: str) -> None:
+        """Drop a session's state (called when a WebSocket disconnects)."""
+        self._sessions.pop(session_id, None)
 
     def decode_base64_image(self, base64_str: str) -> np.ndarray:
         if isinstance(base64_str, str):
             if "," in base64_str:
                 base64_str = base64_str.split(",")[1]
+            # Reject oversized payloads before/after decode (base64 is ~4/3 of bytes).
+            if len(base64_str) > MAX_IMAGE_BYTES * 4 // 3 + 4:
+                raise ValueError("image payload too large")
             image_bytes = base64.b64decode(base64_str)
-            image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+            if len(image_bytes) > MAX_IMAGE_BYTES:
+                raise ValueError("image payload too large")
+            image = Image.open(io.BytesIO(image_bytes))
+            w, h = image.size
+            if w <= 0 or h <= 0 or w * h > MAX_IMAGE_PIXELS:
+                raise ValueError("image dimensions out of bounds")
+            image = image.convert('RGB')
             return cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
         return base64_str
 
