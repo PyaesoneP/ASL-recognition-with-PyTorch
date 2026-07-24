@@ -143,14 +143,15 @@ class ASLApp {
     }
 
     updateROIPosition(bbox) {
-        const videoRect = this.video.getBoundingClientRect();
-        const scaleX = videoRect.width / this.video.videoWidth;
-        const scaleY = videoRect.height / this.video.videoHeight;
+        const leftPct = bbox.x * 100;
+        const topPct = bbox.y * 100;
+        const widthPct = bbox.w * 100;
+        const heightPct = bbox.h * 100;
 
-        this.roiBox.style.left = (bbox.x * scaleX * 100) / videoRect.width * 100 + '%';
-        this.roiBox.style.top = (bbox.y * scaleY * 100) / videoRect.height * 100 + '%';
-        this.roiBox.style.width = (bbox.w * scaleX * 100) / videoRect.width * 100 + '%';
-        this.roiBox.style.height = (bbox.h * scaleY * 100) / videoRect.height * 100 + '%';
+        this.roiBox.style.left = leftPct + '%';
+        this.roiBox.style.top = topPct + '%';
+        this.roiBox.style.width = widthPct + '%';
+        this.roiBox.style.height = heightPct + '%';
     }
 
     cropAndPredict(bbox) {

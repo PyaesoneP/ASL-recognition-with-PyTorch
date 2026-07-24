@@ -5,8 +5,9 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.models import (
@@ -58,8 +59,17 @@ app.add_middleware(
 
 # Serve frontend static files (for single-container deployment on Render)
 _frontend_path = Path(__file__).resolve().parents[1] / "frontend"
+
 if _frontend_path.exists():
-    app.mount("/", StaticFiles(directory=str(_frontend_path), html=True), name="frontend")
+    app.mount("/static", StaticFiles(directory=str(_frontend_path), html=True), name="frontend")
+
+
+@app.get("/")
+async def serve_index():
+    index_file = _frontend_path / "index.html"
+    if index_file.exists():
+        return FileResponse(str(index_file))
+    return {"detail": "Frontend not found"}
 
 
 @app.get("/api/health", response_model=HealthResponse)
