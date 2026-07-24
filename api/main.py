@@ -18,7 +18,7 @@ from api.models import (
 )
 from api.services.predictor import InferenceService
 
-model_path = os.getenv("MODEL_PATH", "outputs/models/best_mobilenet_v2.pth")
+model_path = os.getenv("MODEL_PATH", "outputs/models/best_mobilenet_v2.onnx")
 model_type = os.getenv("MODEL_TYPE", "mobilenet_v2")
 
 service = InferenceService(model_path=model_path, model_type=model_type)
