@@ -99,7 +99,9 @@ train_samples, val_samples = [], []
 rng = random.Random(SEED)
 for cls_idx, items in per_class.items():
     rng.shuffle(items)
-    n_val = int(len(items) * VAL_FRACTION)
+    # Guarantee at least one val sample for any class with >=2 images, and
+    # never take them all, so every class is represented in both splits.
+    n_val = max(1, int(len(items) * VAL_FRACTION)) if len(items) > 1 else 0
     val_samples.extend(items[:n_val])
     train_samples.extend(items[n_val:])
 rng.shuffle(train_samples)
