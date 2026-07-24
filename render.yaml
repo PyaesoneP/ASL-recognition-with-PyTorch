@@ -2,10 +2,10 @@
 services:
   - type: web
     name: asl-recognition-backend
-    env: docker
+    runtime: docker
     plan: free
     region: singapore
-    env_vars:
+    envVars:
       - key: MODEL_TYPE
         value: mobilenet_v2
       - key: MODEL_PATH
