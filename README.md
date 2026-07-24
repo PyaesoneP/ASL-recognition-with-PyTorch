@@ -23,13 +23,30 @@ Webcam → Hand Detection (MediaPipe) → ROI Crop → CNN Inference → Tempora
 pip install -r requirements.txt
 
 # Run inference (MediaPipe hand detection)
-python asl_pytorch_inference.py
+python src/inference/__init__.py
 
 # Fallback mode (fixed ROI, no MediaPipe)
-python asl_pytorch_inference.py --simple
+python src/inference/__init__.py --simple
 
 # Capture training images
 python src/scripts/capture_asl_images.py
+```
+
+### Training
+
+Train on MediaPipe hand crops so the model sees the same framing the app feeds
+it at inference:
+
+```bash
+# One-time: download the MediaPipe hand-landmarker model used for cropping
+mkdir -p outputs/mp && curl -sSL -o outputs/mp/hand_landmarker.task \
+  https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+
+# 1. Crop datasets/combined_training → datasets/combined_cropped (hand regions)
+python crop_dataset.py
+
+# 2. Train MobileNetV2 on the crops and export ONNX to outputs/models/
+python train_and_export.py
 ```
 
 ### Web App (Docker)
@@ -68,15 +85,26 @@ MODEL_TYPE=resnet50 docker compose up -d
 
 ## Configuration
 
-All tunable parameters live in `src/config/settings.py`:
+Prediction parameters live in `src/config/settings.py` (all overridable by env var):
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `CONFIDENCE_THRESHOLD` | 0.65 | Minimum prediction confidence |
+| `CONFIDENCE_THRESHOLD` | 0.65 | Minimum prediction confidence to commit a letter |
 | `STABILITY_FRAMES` | 12 | Frames to hold before committing a letter |
-| `COOLDOWN_FRAMES` | 18 | Legacy; letter repeats are now gated by a require-release debounce, not a frame count |
+| `COOLDOWN_FRAMES` | 18 | Legacy — not used; commits are gated by `STABILITY_FRAMES` + `CONFIDENCE_THRESHOLD` |
 | `SMOOTHING_WINDOW` | 5 | Majority voting window size |
 | `IMG_SIZE` | 224 | Input image size |
+
+The API layer reads additional env vars directly (`api/main.py`, `api/services/predictor.py`):
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `MODEL_PATH` | `outputs/models/best_mobilenet_v2.onnx` | ONNX model served by the API |
+| `MODEL_TYPE` | `mobilenet_v2` | Registered backbone name |
+| `ALLOWED_ORIGINS` | `*` | Comma-separated CORS origins; anything but `*` also enables credentials |
+| `MAX_SESSIONS` | 512 | LRU cap on concurrent per-connection sessions |
+| `MAX_IMAGE_BYTES` | 6 MB | Max decoded image size accepted by the API |
+| `MAX_IMAGE_PIXELS` | 4096² | Max image dimensions (decompression-bomb guard) |
 
 ## Controls
 
@@ -127,13 +155,16 @@ See [`docs/AGENTS.md`](docs/AGENTS.md) for full endpoint reference.
 │   ├── css/             # Dark theme styling
 │   └── js/              # MediaPipe integration, sentence manager
 ├── notebooks/           # Training notebooks
-├── datasets/            # Training data
+├── datasets/            # Training data (combined_training, combined_cropped)
 ├── outputs/
-│   ├── models/          # Trained model checkpoints
+│   ├── models/          # Trained model checkpoints (ONNX via Git LFS)
 │   └── metrics/         # Training metrics
 ├── docs/                # Architecture documentation
+├── crop_dataset.py      # MediaPipe hand-crop preprocessing (train/serve parity)
+├── train_and_export.py  # Train MobileNetV2 on crops → export ONNX
 ├── generate_models.py   # Generate model weights from LFS pointers
-├── docker-compose.yml   # Service orchestration
+├── docker-compose.yml   # Local two-container orchestration (api + nginx)
+├── render.yaml          # Render single-container blueprint
 ├── test_webapp.py       # 115 unit/integration tests
 └── test_edge_cases.py   # 60 edge case tests
 ```
@@ -149,7 +180,7 @@ See [`docs/`](docs/) for detailed documentation:
 
 ## Requirements
 
-- **OS**: Windows (primary), Linux with `--simple` fallback
+- **OS**: Windows, Linux, macOS, or WSL2 (the desktop viewer's `--simple` flag skips MediaPipe if it's unavailable)
 - **Python**: 3.8+
 - **GPU**: Optional (CUDA auto-detected; CPU fallback supported)
 
