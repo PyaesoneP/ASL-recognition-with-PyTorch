@@ -195,6 +195,32 @@ try:
     # OnnxInferenceEngine class exists (structure check — won't load without real model file)
     check("OnnxInferenceEngine class exists", OnnxInferenceEngine is not None)
 
+    # ModelRegistry strategy pattern (ADR-005)
+    from api.services.predictor import ModelRegistry
+    check("ModelRegistry class exists", ModelRegistry is not None)
+
+    registered = ModelRegistry.list_models()
+    check("ModelRegistry lists 4 types", len(registered) == 4)
+    check("ModelRegistry has mobilenet_v2", "mobilenet_v2" in registered)
+    check("ModelRegistry has resnet50", "resnet50" in registered)
+    check("ModelRegistry has efficientnet_b0", "efficientnet_b0" in registered)
+    check("ModelRegistry has custom_cnn", "custom_cnn" in registered)
+
+    reg_mobilenet = ModelRegistry.get_model("mobilenet_v2", num_classes=29)
+    check("ModelRegistry.get_model returns nn.Module", isinstance(reg_mobilenet, nn.Module))
+    reg_resnet = ModelRegistry.get_model("resnet50", num_classes=29)
+    check("ModelRegistry supports resnet50", isinstance(reg_resnet, nn.Module))
+    reg_effnet = ModelRegistry.get_model("efficientnet_b0", num_classes=29)
+    check("ModelRegistry supports efficientnet_b0", isinstance(reg_effnet, nn.Module))
+    reg_custom = ModelRegistry.get_model("custom_cnn", num_classes=29)
+    check("ModelRegistry supports custom_cnn", isinstance(reg_custom, nn.Module))
+
+    try:
+        ModelRegistry.get_model("nonexistent")
+        check("ModelRegistry: unknown type raises ValueError", False, "should have raised")
+    except ValueError:
+        check("ModelRegistry: unknown type raises ValueError", True)
+
 except Exception as e:
     import traceback
     check("Predictor service tests", False, traceback.format_exc())

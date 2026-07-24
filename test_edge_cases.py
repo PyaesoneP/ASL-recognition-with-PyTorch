@@ -131,6 +131,50 @@ check("SentenceBuilder: consecutive dels", sb10.get_sentence() == "HE")
 
 
 # ---------------------------------------------------------------------------
+# Edge Cases: ModelRegistry (ADR-005 strategy pattern)
+# ---------------------------------------------------------------------------
+
+print("\n=== EDGE CASES: ModelRegistry ===\n")
+
+from api.services.predictor import ModelRegistry
+import torch.nn as nn
+
+check("ModelRegistry: class exists", ModelRegistry is not None)
+
+# All four model types registered
+registered = ModelRegistry.list_models()
+check("ModelRegistry: lists 4 model types", len(registered) == 4)
+check("ModelRegistry: has mobilenet_v2", "mobilenet_v2" in registered)
+check("ModelRegistry: has resnet50", "resnet50" in registered)
+check("ModelRegistry: has efficientnet_b0", "efficientnet_b0" in registered)
+check("ModelRegistry: has custom_cnn", "custom_cnn" in registered)
+
+# get_model returns nn.Module for each type
+mobilenet = ModelRegistry.get_model("mobilenet_v2", num_classes=29)
+check("ModelRegistry: mobilenet_v2 returns nn.Module", isinstance(mobilenet, nn.Module))
+
+resnet = ModelRegistry.get_model("resnet50", num_classes=29)
+check("ModelRegistry: resnet50 returns nn.Module", isinstance(resnet, nn.Module))
+
+effnet = ModelRegistry.get_model("efficientnet_b0", num_classes=29)
+check("ModelRegistry: efficientnet_b0 returns nn.Module", isinstance(effnet, nn.Module))
+
+custom = ModelRegistry.get_model("custom_cnn", num_classes=29)
+check("ModelRegistry: custom_cnn returns nn.Module", isinstance(custom, nn.Module))
+
+# Custom num_classes
+mobilenet_5 = ModelRegistry.get_model("mobilenet_v2", num_classes=5)
+check("ModelRegistry: custom num_classes", isinstance(mobilenet_5, nn.Module))
+
+# Unknown model type raises ValueError
+try:
+    ModelRegistry.get_model("unknown_model")
+    check("ModelRegistry: unknown type raises ValueError", False, "should have raised")
+except ValueError:
+    check("ModelRegistry: unknown type raises ValueError", True)
+
+
+# ---------------------------------------------------------------------------
 # Edge Cases: ImagePreprocessor
 # ---------------------------------------------------------------------------
 
