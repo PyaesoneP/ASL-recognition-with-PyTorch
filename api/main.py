@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="ASL Recognition API",
     description="Real-time American Sign Language recognition via webcam",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
