@@ -15,6 +15,7 @@ DATASETS = {
     "test": "datasets/asl_alphabet_test/",
     "organized": "datasets/asl_test_organized/",
     "combined": "datasets/combined_training/",
+    "cropped": "datasets/combined_cropped/",   # MediaPipe hand crops (train/serve parity)
     "custom": "datasets/custom_dataset/",
 }
 

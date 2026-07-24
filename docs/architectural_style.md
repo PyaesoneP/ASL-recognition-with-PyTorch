@@ -158,12 +158,20 @@ The pipeline architecture maps to a client-server web deployment:
 
 ### Communication
 
+The browser detects and crops the hand (Stages 1–3) and streams the cropped
+image to the server, which runs classification **and** sentence-building
+(Stages 4–7) in one round trip and returns the updated transcript. The live
+frontend uses the WebSocket path:
+
 ```
-Browser ──POST cropped_image──→ /api/predict ──→ {class, confidence}
-Browser ←───────────────────────────────────────────
-Browser ──POST {class, confidence}──→ /api/update ──→ {sentence, added_letter}
-Browser ←────────────────────────────────────────────
+Browser ──{action:"predict", image}──▶ WS /api/stream
+Browser ◀──{prediction, confidence, sentence}── (server classifies + builds sentence)
 ```
+
+Equivalent request/response HTTP endpoints exist for non-streaming clients and
+tests: `POST /api/predict` (classification only → `{class, confidence}`) and
+`POST /api/update` (`{class, confidence}` → `{sentence, added_letter}`). All
+paths share the same per-session `SentenceBuilder` + `TemporalSmoother`.
 
 The pipeline's stage boundaries align with natural API boundaries. Stages 1-3 move to the client (reducing bandwidth), while Stages 4-7 remain server-side (protecting the model).
 

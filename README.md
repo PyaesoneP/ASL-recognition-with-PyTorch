@@ -38,12 +38,18 @@ python src/scripts/capture_asl_images.py
 # Generate model weights (replaces Git LFS pointers)
 .venv/bin/python generate_models.py
 
-# Start stack — frontend at http://localhost
+# Start stack — nginx frontend at http://localhost proxying the API container
 docker compose up -d
 
 # Stop
 docker compose down
 ```
+
+> **Deployment note:** `docker-compose.yml` + `frontend/nginx.conf` run a
+> two-container setup (nginx serves the frontend and proxies `/api/` to the
+> `api` service) for local use. Render instead deploys a **single** container
+> (`render.yaml`) where FastAPI serves the frontend via `StaticFiles` — nginx
+> is not used there.
 
 ## Models
 
@@ -68,11 +74,13 @@ All tunable parameters live in `src/config/settings.py`:
 |-----------|---------|-------------|
 | `CONFIDENCE_THRESHOLD` | 0.65 | Minimum prediction confidence |
 | `STABILITY_FRAMES` | 12 | Frames to hold before committing a letter |
-| `COOLDOWN_FRAMES` | 18 | Frames between letter additions |
+| `COOLDOWN_FRAMES` | 18 | Legacy; letter repeats are now gated by a require-release debounce, not a frame count |
 | `SMOOTHING_WINDOW` | 5 | Majority voting window size |
 | `IMG_SIZE` | 224 | Input image size |
 
 ## Controls
+
+**Desktop viewer** (`src/inference`, OpenCV window):
 
 | Key | Action |
 |-----|--------|
@@ -82,6 +90,8 @@ All tunable parameters live in `src/config/settings.py`:
 | BACKSPACE | Delete last character |
 | S | Save screenshot |
 | R | Reset prediction history |
+
+**Web app** (browser): `C` clear · `Space` add space · `Backspace` delete last.
 
 ## Web App Architecture
 
