@@ -45,10 +45,10 @@ class SentenceManager {
     display(text) {
         if (!text || text.trim() === '') {
             this.sentenceBox.textContent = this.placeholder;
-            this.sentenceBox.style.color = '#555';
+            this.sentenceBox.classList.add('empty');
         } else {
             this.sentenceBox.textContent = text;
-            this.sentenceBox.style.color = '#ffffff';
+            this.sentenceBox.classList.remove('empty');
         }
     }
 
@@ -73,6 +73,17 @@ class SentenceManager {
     }
 
     updateFromServer(sentence) {
-        this.display(sentence);
+        const prev = this._lastText || '';
+        const next = sentence || '';
+        this._lastText = next;
+        this.display(next);
+
+        // Flash the transcript frame when a character is committed.
+        if (next.length > prev.length && next.trim() !== '') {
+            this.sentenceBox.classList.add('committed');
+            clearTimeout(this._commitTimer);
+            this._commitTimer = setTimeout(
+                () => this.sentenceBox.classList.remove('committed'), 450);
+        }
     }
 }

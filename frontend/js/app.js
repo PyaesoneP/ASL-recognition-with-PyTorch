@@ -95,13 +95,14 @@ class ASLApp {
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
             const landmarks = results.multiHandLandmarks[0];
 
-            drawLandmarks(this.overlayCtx, landmarks);
             drawConnectors(this.overlayCtx, landmarks, HAND_CONNECTIONS, {
-                color: '#00ff88',
+                color: '#ffb000',
                 lineWidth: 2
             });
+            drawLandmarks(this.overlayCtx, landmarks);
 
             this.roiBox.classList.add('active');
+            this.setStatus('detecting', 'Tracking');
 
             const bbox = this.getBounds(landmarks);
             this.updateROIPosition(bbox);
@@ -112,8 +113,10 @@ class ASLApp {
             }
         } else {
             this.roiBox.classList.remove('active');
-            this.predictionLabel.textContent = 'No gesture';
+            this.setStatus('ready', 'Live');
+            this.predictionLabel.textContent = '—';
             this.confidenceFill.style.width = '0%';
+            this.confidenceFill.className = 'confidence-fill';
             this.confidenceValue.textContent = '0%';
         }
     }
@@ -143,7 +146,11 @@ class ASLApp {
     }
 
     updateROIPosition(bbox) {
-        const leftPct = bbox.x * 100;
+        // The video + overlay are CSS-mirrored (transform: scaleX(-1)) for a
+        // selfie view, but this box element is not. MediaPipe landmarks are in
+        // un-mirrored image space, so flip x here to line the box up with the
+        // hand as the user sees it.
+        const leftPct = (1 - bbox.x - bbox.w) * 100;
         const topPct = bbox.y * 100;
         const widthPct = bbox.w * 100;
         const heightPct = bbox.h * 100;
@@ -185,18 +192,12 @@ class ASLApp {
     }
 
     sendPrediction(imageBase64) {
-        fetch(`${API_BASE}/api/predict`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image: imageBase64 })
-        })
-            .then(res => res.json())
-            .then(data => {
-                this.updatePrediction(data);
-            })
-            .catch(err => {
-                console.error('Predict error:', err);
-            });
+        // Send frames over the WebSocket so the server's SentenceBuilder runs
+        // and writes letters. The old HTTP /api/predict path never built the
+        // sentence, so letters were never committed.
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ action: 'predict', image: imageBase64 }));
+        }
     }
 
     updatePrediction(data) {
@@ -206,16 +207,13 @@ class ASLApp {
             this.confidenceFill.style.width = pct + '%';
             this.confidenceValue.textContent = pct + '%';
 
-            if (pct > 70) {
-                this.confidenceFill.style.background = 'linear-gradient(90deg, #4caf50, #8bc34a)';
-            } else if (pct > 40) {
-                this.confidenceFill.style.background = 'linear-gradient(90deg, #ff9800, #ffc107)';
-            } else {
-                this.confidenceFill.style.background = 'linear-gradient(90deg, #f44336, #ff5722)';
-            }
+            // Signal-level class drives colour via CSS (no inline gradients).
+            const level = pct > 70 ? 'high' : pct > 40 ? 'med' : 'low';
+            this.confidenceFill.className = 'confidence-fill ' + level;
         } else {
-            this.predictionLabel.textContent = 'No gesture';
+            this.predictionLabel.textContent = '—';
             this.confidenceFill.style.width = '0%';
+            this.confidenceFill.className = 'confidence-fill';
             this.confidenceValue.textContent = '0%';
         }
     }
@@ -231,8 +229,9 @@ class ASLApp {
         this.ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             if (data.type === 'prediction') {
-                if (data.prediction && data.prediction !== 'nothing') {
-                    this.sentence.updateFromServer(data.sentence || '');
+                this.updatePrediction(data);                     // label + confidence bar
+                if (typeof data.sentence === 'string') {
+                    this.sentence.updateFromServer(data.sentence); // committed letters
                 }
             } else if (data.type === 'sentence') {
                 this.sentence.updateFromServer(data.sentence || '');
@@ -268,6 +267,11 @@ class ASLApp {
     }
 
     setStatus(state, text) {
+        // Guard against re-setting the same state — otherwise assigning
+        // className every frame restarts the LED pulse animation.
+        if (this._statusState === state && this._statusText === text) return;
+        this._statusState = state;
+        this._statusText = text;
         this.statusDot.className = 'status-dot ' + state;
         this.statusText.textContent = text;
     }
