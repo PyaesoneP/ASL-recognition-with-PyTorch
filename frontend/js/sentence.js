@@ -53,8 +53,8 @@ class SentenceManager {
     }
 
     clear() {
-        this.sentenceBox.textContent = this.placeholder;
-        this.sentenceBox.style.color = '#555';
+        this._lastText = '';
+        this.display('');            // placeholder + .empty class (no inline colour)
         if (this.onSentenceUpdate) {
             this.onSentenceUpdate('clear', '');
         }
@@ -75,11 +75,14 @@ class SentenceManager {
     updateFromServer(sentence) {
         const prev = this._lastText || '';
         const next = sentence || '';
+        if (next === prev) return;   // unchanged — skip redundant DOM writes
         this._lastText = next;
         this.display(next);
 
-        // Flash the transcript frame when a character is committed.
-        if (next.length > prev.length && next.trim() !== '') {
+        // Flash only when a non-space character was appended (a real letter
+        // commit), not when a space is added or text is deleted.
+        const added = next.length > prev.length ? next.slice(prev.length) : '';
+        if (added.trim() !== '') {
             this.sentenceBox.classList.add('committed');
             clearTimeout(this._commitTimer);
             this._commitTimer = setTimeout(

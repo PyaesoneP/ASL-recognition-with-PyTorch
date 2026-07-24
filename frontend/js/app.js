@@ -197,6 +197,10 @@ class ASLApp {
         // sentence, so letters were never committed.
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({ action: 'predict', image: imageBase64 }));
+            this._wsWarned = false;
+        } else if (!this._wsWarned) {
+            this._wsWarned = true;   // warn once per disconnected stretch
+            console.warn('ASL: dropping frames — prediction WebSocket is not open.');
         }
     }
 
