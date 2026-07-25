@@ -187,17 +187,27 @@ class ASLApp {
         const vw = this.video.videoWidth;
         const vh = this.video.videoHeight;
 
-        const x = Math.max(0, (bbox.x * vw) | 0);
-        const y = Math.max(0, (bbox.y * vh) | 0);
-        const w = Math.min(vw - x, (bbox.w * vw) | 0);
-        const h = Math.min(vh - y, (bbox.h * vh) | 0);
+        // bbox is a square in NORMALISED coords. Scaling each side by its own
+        // axis (w*vw, h*vh) yields a NON-square pixel rect on a 4:3 camera, and
+        // drawImage would stretch it into 224x224 — squishing the hand ~33%.
+        // Training crops are square in PIXELS (square source images), so build a
+        // square pixel crop here too: side = the larger pixel extent, centred on
+        // the hand and clamped so the square stays intact at frame edges.
+        const cxPx = (bbox.x + bbox.w / 2) * vw;
+        const cyPx = (bbox.y + bbox.h / 2) * vh;
+        let side = Math.min(Math.max(bbox.w * vw, bbox.h * vh) | 0, vw, vh);
 
-        if (w <= 0 || h <= 0) return;
+        if (side <= 0) return;
+
+        let x = Math.round(cxPx - side / 2);
+        let y = Math.round(cyPx - side / 2);
+        x = Math.max(0, Math.min(x, vw - side));
+        y = Math.max(0, Math.min(y, vh - side));
 
         canvas.width = 224;
         canvas.height = 224;
 
-        ctx.drawImage(this.video, x, y, w, h, 0, 0, 224, 224);
+        ctx.drawImage(this.video, x, y, side, side, 0, 0, 224, 224);
 
         canvas.toBlob((blob) => {
             if (blob) {
