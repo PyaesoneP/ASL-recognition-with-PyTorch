@@ -23,13 +23,21 @@ IMG_SIZE = 224
 PADDING = 0.25          # must match frontend getBounds()
 MODEL = "outputs/mp/hand_landmarker.task"
 
-opts = vision.HandLandmarkerOptions(
-    base_options=BaseOptions(model_asset_path=MODEL),
-    running_mode=vision.RunningMode.IMAGE,
-    num_hands=1,
-    min_hand_detection_confidence=0.5,
-)
-landmarker = vision.HandLandmarker.create_from_options(opts)
+
+def build_landmarker(model_path=MODEL):
+    """Create a single-hand MediaPipe HandLandmarker (IMAGE mode).
+
+    A factory rather than module-level state, so this module can be imported for
+    its pure helpers (hand_bbox) without needing the .task file present.
+    benchmark.py reuses build_landmarker()/hand_bbox() for its --crop path.
+    """
+    opts = vision.HandLandmarkerOptions(
+        base_options=BaseOptions(model_asset_path=model_path),
+        running_mode=vision.RunningMode.IMAGE,
+        num_hands=1,
+        min_hand_detection_confidence=0.5,
+    )
+    return vision.HandLandmarker.create_from_options(opts)
 
 
 def hand_bbox(landmarks, vw, vh):
@@ -50,6 +58,7 @@ def hand_bbox(landmarks, vw, vh):
 
 
 def main():
+    landmarker = build_landmarker()
     classes = sorted(c.name for c in SRC.iterdir() if c.is_dir())
     total = detected = fallback = 0
     per_class = {}
