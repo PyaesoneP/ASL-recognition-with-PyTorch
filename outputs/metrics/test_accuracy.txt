@@ -1,0 +1,4 @@
+held_out_test_accuracy 0.9954
+test_images 1739
+val_best 0.9977
+split_train_val_test 0.80/0.10/0.10
