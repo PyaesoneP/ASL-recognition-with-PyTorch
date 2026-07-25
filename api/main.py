@@ -10,6 +10,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.websockets import WebSocketState
 
 from api.models import (
     PredictRequest,
@@ -235,7 +236,16 @@ async def stream(websocket: WebSocket):
     except WebSocketDisconnect:
         print("WebSocket client disconnected")
     except Exception as e:
+        # A send to an already-closed peer raises a plain RuntimeError (not
+        # WebSocketDisconnect). Only attempt to close if the socket is still
+        # open, and swallow any close-after-close error so it doesn't surface
+        # as an ASGI crash (which would otherwise churn client reconnects and
+        # reset per-session sentence/stability state).
         print(f"WebSocket error: {e}")
-        await websocket.close()
+        if websocket.client_state == WebSocketState.CONNECTED:
+            try:
+                await websocket.close()
+            except RuntimeError:
+                pass
     finally:
         service.remove_session(session_id)
