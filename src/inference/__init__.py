@@ -28,18 +28,30 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
 try:
-    from src.config.settings import BASE_DIR, DEFAULT_MODEL_PATH, PREDICTION_DEFAULTS
+    from src.config.settings import (
+        BASE_DIR, DEFAULT_MODEL_PATH, PREDICTION_DEFAULTS, CLASS_NAMES, NUM_CLASSES,
+    )
 except ImportError:
     # Fallback for direct execution without proper package structure
     BASE_DIR = Path(__file__).resolve().parents[2]
     DEFAULT_MODEL_PATH = "outputs/models/best_mobilenet_v2.pth"
     PREDICTION_DEFAULTS = {
-        "CONFIDENCE_THRESHOLD": 0.65,
-        "STABILITY_FRAMES": 12,
+        "CONFIDENCE_THRESHOLD": 0.5,
+        "STABILITY_FRAMES": 6,
         "COOLDOWN_FRAMES": 18,
-        "SMOOTHING_WINDOW": 5,
+        "SMOOTHING_WINDOW": 3,
         "IMG_SIZE": 224,
     }
+    CLASS_NAMES = [
+        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+        'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+        'del', 'nothing', 'space',
+    ]
+    NUM_CLASSES = 29
+
+# CustomCNN is shared with the API via src/models.py (single source of truth,
+# train/serve parity). ROOT_DIR is already on sys.path (see top of file).
+from src.models import CustomCNN
 
 # ============================================================
 # CONFIGURATION - UPDATE THESE!
@@ -49,11 +61,6 @@ MODEL_PATH = str(BASE_DIR / DEFAULT_MODEL_PATH)
 MODEL_TYPE = "mobilenet_v2"
 
 IMG_SIZE = PREDICTION_DEFAULTS["IMG_SIZE"]
-
-CLASS_NAMES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
-               'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-               'del', 'nothing', 'space']
-NUM_CLASSES = 29
 
 CONFIDENCE_THRESHOLD = PREDICTION_DEFAULTS["CONFIDENCE_THRESHOLD"]
 STABILITY_FRAMES = PREDICTION_DEFAULTS["STABILITY_FRAMES"]
@@ -72,70 +79,6 @@ inference_transforms = transforms.Compose([
         std=[0.229, 0.224, 0.225]
     )
 ])
-
-
-class CustomCNN(nn.Module):
-    """Custom CNN architecture (must match training!)"""
-    
-    def __init__(self, num_classes=29):
-        super(CustomCNN, self).__init__()
-        
-        self.conv_blocks = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(0.25),
-            
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(0.25),
-            
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(128, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(0.25),
-            
-            nn.Conv2d(128, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(256, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(0.25),
-        )
-        
-        self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
-        
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(256, 512),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.5),
-            nn.Linear(512, 256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.5),
-            nn.Linear(256, num_classes)
-        )
-    
-    def forward(self, x):
-        x = self.conv_blocks(x)
-        x = self.global_pool(x)
-        x = self.classifier(x)
-        return x
 
 
 def load_model(model_path, model_type, num_classes=29):

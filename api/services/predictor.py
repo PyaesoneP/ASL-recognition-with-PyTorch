@@ -33,8 +33,13 @@ try:
         sys.path.insert(0, _settings_base)
 
     from config.settings import (
-        PREDICTION_DEFAULTS,
+        PREDICTION_DEFAULTS, CLASS_NAMES, NUM_CLASSES,
     )
+    # CustomCNN + ModelRegistry are shared with the desktop pipeline in
+    # src/models.py; re-exported below so tests importing them from this module
+    # keep working. torch may be absent in the ONNX-only container — the shared
+    # module degrades to CustomCNN=None and ONNX inference is unaffected.
+    from models import CustomCNN, ModelRegistry
 
     CONFIDENCE_THRESHOLD = PREDICTION_DEFAULTS["CONFIDENCE_THRESHOLD"]
     STABILITY_FRAMES = PREDICTION_DEFAULTS["STABILITY_FRAMES"]
@@ -50,13 +55,14 @@ except ImportError:
     COOLDOWN_FRAMES = 18
     SMOOTHING_WINDOW = 3
     IMG_SIZE = 224
-
-CLASS_NAMES = [
-    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
-    'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-    'del', 'nothing', 'space',
-]
-NUM_CLASSES = 29
+    CLASS_NAMES = [
+        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+        'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+        'del', 'nothing', 'space',
+    ]
+    NUM_CLASSES = 29
+    CustomCNN = None
+    ModelRegistry = None
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
@@ -65,85 +71,6 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", 6 * 1024 * 1024))   # 6 MB
 MAX_IMAGE_PIXELS = int(os.getenv("MAX_IMAGE_PIXELS", 4096 * 4096))
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS   # PIL raises DecompressionBombError past 2x
-
-# ---------------------------------------------------------------------------
-# CustomCNN — lightweight 4-block CNN (trained from scratch)
-# ---------------------------------------------------------------------------
-
-try:
-    import torch
-    import torch.nn as nn
-
-    class CustomCNN(nn.Module):
-        """Custom CNN architecture (must match training!).
-
-        4 convolutional blocks (32->64->128->256 filters) with batch norm,
-        ReLU, max pooling, and dropout. Global average pooling followed by
-        a 3-layer classifier (256->512->256->num_classes).
-        """
-
-        def __init__(self, num_classes=NUM_CLASSES):
-            super().__init__()
-
-            self.conv_blocks = nn.Sequential(
-                nn.Conv2d(3, 32, kernel_size=3, padding=1),
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(32, 32, kernel_size=3, padding=1),
-                nn.BatchNorm2d(32),
-                nn.ReLU(inplace=True),
-                nn.MaxPool2d(2, 2),
-                nn.Dropout2d(0.25),
-
-                nn.Conv2d(32, 64, kernel_size=3, padding=1),
-                nn.BatchNorm2d(64),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(64, 64, kernel_size=3, padding=1),
-                nn.BatchNorm2d(64),
-                nn.ReLU(inplace=True),
-                nn.MaxPool2d(2, 2),
-                nn.Dropout2d(0.25),
-
-                nn.Conv2d(64, 128, kernel_size=3, padding=1),
-                nn.BatchNorm2d(128),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(128, 128, kernel_size=3, padding=1),
-                nn.BatchNorm2d(128),
-                nn.ReLU(inplace=True),
-                nn.MaxPool2d(2, 2),
-                nn.Dropout2d(0.25),
-
-                nn.Conv2d(128, 256, kernel_size=3, padding=1),
-                nn.BatchNorm2d(256),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(256, 256, kernel_size=3, padding=1),
-                nn.BatchNorm2d(256),
-                nn.ReLU(inplace=True),
-                nn.MaxPool2d(2, 2),
-                nn.Dropout2d(0.25),
-            )
-
-            self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
-
-            self.classifier = nn.Sequential(
-                nn.Flatten(),
-                nn.Linear(256, 512),
-                nn.ReLU(inplace=True),
-                nn.Dropout(0.5),
-                nn.Linear(512, 256),
-                nn.ReLU(inplace=True),
-                nn.Dropout(0.5),
-                nn.Linear(256, num_classes),
-            )
-
-        def forward(self, x):
-            x = self.conv_blocks(x)
-            x = self.global_pool(x)
-            x = self.classifier(x)
-            return x
-
-except ImportError:
-    CustomCNN = None  # type: ignore[misc,assignment]
 
 # ---------------------------------------------------------------------------
 # Inference Engine (ONNX Runtime)
@@ -236,12 +163,17 @@ class TemporalSmoother:
         if len(self.prediction_history) >= 3:
             votes = [idx for idx, _ in self.prediction_history]
             most_common = max(set(votes), key=votes.count)
-            vote_count = votes.count(most_common)
-            smoothed_conf = top_conf * (vote_count / len(votes))
-
-            if smoothed_conf >= self.confidence_threshold:
-                top_idx = most_common
-                top_conf = smoothed_conf
+            # Consensus decides WHICH class wins the window; it must not deflate
+            # the confidence that CONFIDENCE_THRESHOLD later gates on. Report the
+            # strongest confidence seen for the winning class instead of the old
+            # `top_conf * vote_count/len(votes)`, which *punished* agreement and
+            # could push a confident prediction below threshold, starving the
+            # SentenceBuilder commit gate. (Matches the desktop path's intent.)
+            top_conf = max(
+                (c for idx, c in self.prediction_history if idx == most_common),
+                default=top_conf,
+            )
+            top_idx = most_common
 
         return top_idx, top_conf
 
@@ -378,89 +310,6 @@ class SentenceBuilder:
 
     def get_sentence(self) -> str:
         return self.sentence
-
-# ---------------------------------------------------------------------------
-# ModelRegistry — Strategy Pattern (ADR-005)
-# ---------------------------------------------------------------------------
-
-class ModelRegistry:
-    """Strategy pattern for model architecture selection.
-
-    Registers model factory functions keyed by model type string.
-    The same interface works for any registered model backbone.
-
-    Registered models:
-        mobilenet_v2  — MobileNetV2 (ImageNet pretrained backbone)
-        resnet50      — ResNet50 (ImageNet pretrained backbone)
-        efficientnet_b0 — EfficientNet-B0 (ImageNet pretrained backbone)
-        custom_cnn    — Custom 4-block CNN (trained from scratch)
-    """
-
-    _registry: dict = {}
-
-    @classmethod
-    def register(cls, model_type: str, factory):
-        """Register a model factory function for the given model type."""
-        cls._registry[model_type] = factory
-
-    @classmethod
-    def get_model(cls, model_type: str, num_classes: int = NUM_CLASSES):
-        """Instantiate a model by registered type.
-
-        Args:
-            model_type: One of 'mobilenet_v2', 'resnet50', 'efficientnet_b0', 'custom_cnn'.
-            num_classes: Number of output classes (default 29).
-
-        Returns:
-            An nn.Module instance ready for weights loading.
-
-        Raises:
-            ValueError: If model_type is not registered.
-        """
-        if model_type not in cls._registry:
-            raise ValueError(
-                f"Unknown model type '{model_type}'. "
-                f"Registered types: {list(cls._registry.keys())}"
-            )
-        return cls._registry[model_type](num_classes=num_classes)
-
-    @classmethod
-    def list_models(cls):
-        """Return list of registered model types."""
-        return list(cls._registry.keys())
-
-
-def _register_mobilenet_v2(num_classes: int = NUM_CLASSES):
-    from torchvision import models as tv_models
-    model = tv_models.mobilenet_v2(weights=None)
-    model.classifier[1] = nn.Linear(model.last_channel, num_classes)
-    return model
-
-
-def _register_resnet50(num_classes: int = NUM_CLASSES):
-    from torchvision import models as tv_models
-    model = tv_models.resnet50(weights=None)
-    model.fc = nn.Linear(model.fc.in_features, num_classes)
-    return model
-
-
-def _register_efficientnet_b0(num_classes: int = NUM_CLASSES):
-    from torchvision import models as tv_models
-    model = tv_models.efficientnet_b0(weights=None)
-    model.classifier[1] = nn.Linear(model.classifier[1].in_features, num_classes)
-    return model
-
-
-# Register all four model backbones (only if torch/torchvision available)
-try:
-    ModelRegistry.register("mobilenet_v2", _register_mobilenet_v2)
-    ModelRegistry.register("resnet50", _register_resnet50)
-    ModelRegistry.register("efficientnet_b0", _register_efficientnet_b0)
-    if CustomCNN is not None:
-        ModelRegistry.register("custom_cnn", lambda num_classes=NUM_CLASSES: CustomCNN(num_classes))
-except (ImportError, NameError):
-    pass  # PyTorch-based models unavailable; ONNX inference still works
-
 
 # ---------------------------------------------------------------------------
 # Inference Service (facade)

@@ -10,6 +10,16 @@ MODEL_TYPES = ["mobilenet_v2", "resnet50", "efficientnet_b0", "custom_cnn"]
 MODEL_PATH = os.getenv("MODEL_PATH", DEFAULT_MODEL_PATH)
 MODEL_TYPE = os.getenv("MODEL_TYPE", "mobilenet_v2")
 
+# ASL class labels — the 29 Kaggle ASL Alphabet classes (A-Z, del, nothing,
+# space). Single source of truth shared by src/models.py, the desktop pipeline
+# (src/inference), and the ONNX API (api/services/predictor.py).
+CLASS_NAMES = [
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+    'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+    'del', 'nothing', 'space',
+]
+NUM_CLASSES = len(CLASS_NAMES)
+
 DATASETS = {
     "train": "datasets/asl_alphabet_train/",
     "test": "datasets/asl_alphabet_test/",
