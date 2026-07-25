@@ -46,9 +46,9 @@ try:
         sys.path.remove(_settings_base)
 except ImportError:
     CONFIDENCE_THRESHOLD = 0.65
-    STABILITY_FRAMES = 12
+    STABILITY_FRAMES = 6
     COOLDOWN_FRAMES = 18
-    SMOOTHING_WINDOW = 5
+    SMOOTHING_WINDOW = 3
     IMG_SIZE = 224
 
 CLASS_NAMES = [

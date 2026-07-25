@@ -22,8 +22,9 @@ class ASLApp {
         this.camera = null;
         this.ws = null;
         this.isRunning = false;
-        this.frameCount = 0;
-        this.predictInterval = 150;
+        this.predictInterval = 100;   // min ms between prediction sends
+        this._inflight = false;       // true while a frame awaits a response
+        this._lastPredictTs = 0;
 
         // Stable per-browser session id so the server keeps the same sentence
         // and stability state across WebSocket reconnects (a dropped socket no
@@ -127,8 +128,15 @@ class ASLApp {
             const bbox = this.getBounds(landmarks);
             this.updateROIPosition(bbox);
 
-            this.frameCount++;
-            if (this.frameCount % Math.round(this.predictInterval / 16) === 0) {
+            // Pace predictions by wall-clock time AND gate on an in-flight
+            // request: never send a new frame until the previous one has been
+            // answered. The old frame-count modulo assumed 60fps (MediaPipe
+            // often runs 15-30fps) and sent regardless of server readiness, so
+            // on a slow round-trip frames piled up in the socket buffer and the
+            // server processed seconds-stale frames — the "slow to detect" lag.
+            const now = performance.now();
+            if (!this._inflight && now - this._lastPredictTs >= this.predictInterval) {
+                this._lastPredictTs = now;
                 this.cropAndPredict(bbox);
             }
         } else {
@@ -232,10 +240,24 @@ class ASLApp {
                 session_id: this.sessionId,
             }));
             this._wsWarned = false;
-        } else if (!this._wsWarned) {
-            this._wsWarned = true;   // warn once per disconnected stretch
-            console.warn('ASL: dropping frames — prediction WebSocket is not open.');
+            // Block further sends until the response arrives (see the gate in
+            // onMediaPipeResults). A watchdog clears the flag if a response is
+            // lost, so a dropped frame can't wedge predictions permanently.
+            this._inflight = true;
+            clearTimeout(this._inflightTimer);
+            this._inflightTimer = setTimeout(() => { this._inflight = false; }, 2000);
+        } else {
+            this._inflight = false;
+            if (!this._wsWarned) {
+                this._wsWarned = true;   // warn once per disconnected stretch
+                console.warn('ASL: dropping frames — prediction WebSocket is not open.');
+            }
         }
+    }
+
+    clearInflight() {
+        this._inflight = false;
+        clearTimeout(this._inflightTimer);
     }
 
     updatePrediction(data) {
@@ -266,6 +288,7 @@ class ASLApp {
 
         this.ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
+            this.clearInflight();   // response received — allow the next frame
             if (data.type === 'prediction') {
                 this.updatePrediction(data);                     // label + confidence bar
                 if (typeof data.sentence === 'string') {
@@ -277,6 +300,7 @@ class ASLApp {
         };
 
         this.ws.onclose = () => {
+            this.clearInflight();   // don't wedge predictions across a reconnect
             console.log('WebSocket disconnected, reconnecting in 3s...');
             setTimeout(() => this.connectWebSocket(), 3000);
         };

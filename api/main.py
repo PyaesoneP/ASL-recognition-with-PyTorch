@@ -1,5 +1,6 @@
 """FastAPI application for ASL recognition web service."""
 
+import asyncio
 import cv2
 import os
 import uuid
@@ -221,8 +222,14 @@ async def stream(websocket: WebSocket):
                 image_b64 = message.get("image")
                 if image_b64:
                     try:
-                        image_bgr = service.decode_base64_image(image_b64)
-                        label, confidence, _ = service.predict(image_bgr, session_id)
+                        # decode + ONNX inference are synchronous CPU work; run
+                        # them in a thread so a slow frame doesn't block the
+                        # event loop (which would serialize all connections and
+                        # let the socket buffer backlog with stale frames).
+                        image_bgr = await asyncio.to_thread(
+                            service.decode_base64_image, image_b64)
+                        label, confidence, _ = await asyncio.to_thread(
+                            service.predict, image_bgr, session_id)
 
                         if label and label != "nothing":
                             service.update_sentence(session_id, "predict", label, confidence)

@@ -21,8 +21,8 @@ DATASETS = {
 
 PREDICTION_DEFAULTS = {
     "CONFIDENCE_THRESHOLD": float(os.getenv("CONFIDENCE_THRESHOLD", 0.65)),
-    "STABILITY_FRAMES": int(os.getenv("STABILITY_FRAMES", 12)),
+    "STABILITY_FRAMES": int(os.getenv("STABILITY_FRAMES", 6)),
     "COOLDOWN_FRAMES": int(os.getenv("COOLDOWN_FRAMES", 18)),
-    "SMOOTHING_WINDOW": int(os.getenv("SMOOTHING_WINDOW", 5)),
+    "SMOOTHING_WINDOW": int(os.getenv("SMOOTHING_WINDOW", 3)),
     "IMG_SIZE": int(os.getenv("IMG_SIZE", 224)),
 }
