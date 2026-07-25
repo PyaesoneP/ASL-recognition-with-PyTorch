@@ -2,8 +2,6 @@
  * Main app: camera capture, MediaPipe hand detection, canvas ROI crop, API calls.
  */
 
-const API_BASE = window.location.origin;
-
 class ASLApp {
     constructor() {
         this.video = document.getElementById('video');
@@ -27,7 +25,29 @@ class ASLApp {
         this.frameCount = 0;
         this.predictInterval = 150;
 
+        // Stable per-browser session id so the server keeps the same sentence
+        // and stability state across WebSocket reconnects (a dropped socket no
+        // longer wipes the built-up sentence).
+        this.sessionId = this.getOrCreateSessionId();
+
         this.init();
+    }
+
+    getOrCreateSessionId() {
+        let id = null;
+        try {
+            id = localStorage.getItem('asl_session_id');
+            if (!id) {
+                id = (crypto.randomUUID && crypto.randomUUID()) ||
+                    ('s-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+                localStorage.setItem('asl_session_id', id);
+            }
+        } catch (e) {
+            // localStorage unavailable (private mode) — fall back to an
+            // in-memory id that at least survives reconnects this page load.
+            id = 's-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+        }
+        return id;
     }
 
     async init() {
@@ -196,7 +216,11 @@ class ASLApp {
         // and writes letters. The old HTTP /api/predict path never built the
         // sentence, so letters were never committed.
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({ action: 'predict', image: imageBase64 }));
+            this.ws.send(JSON.stringify({
+                action: 'predict',
+                image: imageBase64,
+                session_id: this.sessionId,
+            }));
             this._wsWarned = false;
         } else if (!this._wsWarned) {
             this._wsWarned = true;   // warn once per disconnected stretch
@@ -258,16 +282,15 @@ class ASLApp {
     }
 
     handleSentenceAction(action, prediction) {
-        fetch(`${API_BASE}/api/sentence/update`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action, prediction })
-        })
-            .then(res => res.json())
-            .then(data => {
-                this.sentence.updateFromServer(data.sentence);
-            })
-            .catch(err => console.error('Sentence update error:', err));
+        // Route control actions (clear/space/del) over the same WebSocket and
+        // session_id as predictions, so they operate on the sentence actually
+        // being built. The old HTTP path used a separate "default" session, so
+        // clearing/deleting never touched the streamed sentence.
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ action, session_id: this.sessionId }));
+        } else {
+            console.warn('ASL: control action dropped — WebSocket is not open.');
+        }
     }
 
     setStatus(state, text) {

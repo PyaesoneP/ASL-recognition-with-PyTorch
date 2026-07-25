@@ -159,9 +159,14 @@ async def update(request: UpdateRequest):
 @app.websocket("/api/stream")
 async def stream(websocket: WebSocket):
     await websocket.accept()
-    # Unique per-connection session so concurrent clients don't share one
-    # sentence/smoother. Evicted on disconnect (see finally).
-    session_id = uuid.uuid4().hex
+    # Fallback per-connection session for clients that don't supply a stable id.
+    # A client-supplied session_id (persisted in the browser) is used instead
+    # when present, so the sentence/smoother survive a dropped-and-reconnected
+    # socket. Only the anonymous per-connection session is evicted on disconnect
+    # (see finally); named sessions persist until LRU-evicted in the service.
+    conn_session_id = uuid.uuid4().hex
+    session_id = conn_session_id
+    client_supplied = False
 
     try:
         while True:
@@ -177,6 +182,15 @@ async def stream(websocket: WebSocket):
             except json.JSONDecodeError:
                 await websocket.send_text(json.dumps({"type": "error", "message": "Invalid JSON"}))
                 continue
+
+            # Adopt a client-supplied session id so sentence state survives
+            # reconnects. Bounded to keep unbounded client input from bloating
+            # the LRU keys; falls back to the per-connection id when absent.
+            sid = message.get("session_id")
+            if isinstance(sid, str) and 0 < len(sid) <= 128:
+                session_id = sid
+                client_supplied = True
+
             action = message.get("action", "predict")
 
             if action == "clear":
@@ -248,4 +262,8 @@ async def stream(websocket: WebSocket):
             except RuntimeError:
                 pass
     finally:
-        service.remove_session(session_id)
+        # Only evict the anonymous per-connection session. A client-supplied
+        # session must persist across reconnects (it's LRU-capped in the
+        # service), otherwise the sentence would be wiped on every drop.
+        if not client_supplied:
+            service.remove_session(conn_session_id)
