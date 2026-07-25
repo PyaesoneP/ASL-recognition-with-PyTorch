@@ -1,5 +1,8 @@
-torch
-torchvision
-opencv-python
-mediapipe
-numpy
+# Local/desktop pipeline (training, cropping, desktop viewer).
+# Pinned to the exact versions the model was trained and validated against
+# (see outputs/train.log). Update deliberately, not incidentally.
+torch==2.13.0
+torchvision==0.28.0
+opencv-python==5.0.0.93
+mediapipe==0.10.35
+numpy==2.3.4
