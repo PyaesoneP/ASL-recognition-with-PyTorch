@@ -45,7 +45,7 @@ try:
     if _settings_base in sys.path:
         sys.path.remove(_settings_base)
 except ImportError:
-    CONFIDENCE_THRESHOLD = 0.65
+    CONFIDENCE_THRESHOLD = 0.5
     STABILITY_FRAMES = 6
     COOLDOWN_FRAMES = 18
     SMOOTHING_WINDOW = 3
