@@ -104,7 +104,7 @@ try:
     from api.services.predictor import (
         CLASS_NAMES, NUM_CLASSES, IMG_SIZE,
         ASLPredictor, SentenceBuilder, InferenceService,
-        SMOOTHING_WINDOW, CONFIDENCE_THRESHOLD,
+        SMOOTHING_WINDOW, CONFIDENCE_THRESHOLD, STABILITY_FRAMES,
         ImagePreprocessor, TemporalSmoother, OnnxInferenceEngine,
     )
     check("Import predictor module", True)
@@ -138,7 +138,7 @@ try:
 
     # del action
     sb3 = SentenceBuilder()
-    for _ in range(12):
+    for _ in range(STABILITY_FRAMES):
         sb3.update("A")
     sb3.update("del")
     check("SentenceBuilder handles del", "A" not in sb3.get_sentence())
@@ -158,7 +158,7 @@ try:
     sent = service.update_sentence("session1", "predict", "A")
     check("InferenceService.update_sentence predict (first frame)", sent == "")
 
-    for _ in range(11):
+    for _ in range(STABILITY_FRAMES - 1):
         service.update_sentence("session1", "predict", "A")
     sent = service.get_sentence("session1")
     check("InferenceService get_sentence after stability", sent == "A")
@@ -266,7 +266,7 @@ try:
     check("Predict returns valid class", pred["prediction"] in CLASS_NAMES)
 
     # Sentence update
-    for _ in range(12):
+    for _ in range(STABILITY_FRAMES):
         r = client.post("/api/sentence/update", json={"session_id": "t1", "action": "predict", "prediction": "A"})
     r = client.get("/api/sentence/t1")
     check("POST /api/sentence/update works", r.status_code == 200)
