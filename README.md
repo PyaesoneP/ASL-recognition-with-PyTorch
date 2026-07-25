@@ -83,16 +83,22 @@ Switch models by updating `MODEL_TYPE` in `src/config/settings.py` or via env va
 MODEL_TYPE=resnet50 docker compose up -d
 ```
 
+## Results
+
+See [`RESULTS.md`](RESULTS.md) for datasets, the 4-model comparison, deployed-model
+accuracy, latency benchmarks, and honest limitations. Regenerate metrics any time with
+[`benchmark.py`](benchmark.py).
+
 ## Configuration
 
 Prediction parameters live in `src/config/settings.py` (all overridable by env var):
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `CONFIDENCE_THRESHOLD` | 0.65 | Minimum prediction confidence to commit a letter |
-| `STABILITY_FRAMES` | 12 | Frames to hold before committing a letter |
+| `CONFIDENCE_THRESHOLD` | 0.5 | Minimum prediction confidence to commit a letter |
+| `STABILITY_FRAMES` | 6 | Frames to hold before committing a letter |
 | `COOLDOWN_FRAMES` | 18 | Legacy — not used; commits are gated by `STABILITY_FRAMES` + `CONFIDENCE_THRESHOLD` |
-| `SMOOTHING_WINDOW` | 5 | Majority voting window size |
+| `SMOOTHING_WINDOW` | 3 | Majority voting window size |
 | `IMG_SIZE` | 224 | Input image size |
 
 The API layer reads additional env vars directly (`api/main.py`, `api/services/predictor.py`):
@@ -165,8 +171,9 @@ See [`docs/AGENTS.md`](docs/AGENTS.md) for full endpoint reference.
 ├── generate_models.py   # Generate model weights from LFS pointers
 ├── docker-compose.yml   # Local two-container orchestration (api + nginx)
 ├── render.yaml          # Render single-container blueprint
+├── benchmark.py         # ONNX model eval: accuracy, P/R/F1, confusion matrix, latency
 ├── test_webapp.py       # 115 unit/integration tests
-└── test_edge_cases.py   # 60 edge case tests
+└── test_edge_cases.py   # 62 edge case tests
 ```
 
 ## Architecture

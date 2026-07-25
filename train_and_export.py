@@ -24,7 +24,8 @@ WEIGHT_DECAY = 1e-4
 LABEL_SMOOTHING = 0.05    # light — keeps calibration without capping confidence too hard
 DROPOUT = 0.3
 FREEZE_BLOCKS = 4          # freeze the first N of MobileNetV2's 19 feature blocks
-VAL_FRACTION = 0.15
+VAL_FRACTION = 0.10        # 80/10/10 train/val/test split, stratified per class
+TEST_FRACTION = 0.10       # held out of BOTH train and val (no leakage)
 SEED = 42
 
 random.seed(SEED)
@@ -95,26 +96,33 @@ def gather_samples(root_dir):
 # ordered class-by-class, so entire classes landed in val and were never
 # trained. We now split WITHIN each class so both sets cover all 29 classes.
 per_class = gather_samples(TRAIN_DIR)
-train_samples, val_samples = [], []
+train_samples, val_samples, test_samples = [], [], []
 rng = random.Random(SEED)
 for cls_idx, items in per_class.items():
     rng.shuffle(items)
-    # Guarantee at least one val sample for any class with >=2 images, and
-    # never take them all, so every class is represented in both splits.
-    n_val = max(1, int(len(items) * VAL_FRACTION)) if len(items) > 1 else 0
-    val_samples.extend(items[:n_val])
-    train_samples.extend(items[n_val:])
+    n = len(items)
+    # Carve a held-out TEST set and a VAL set WITHIN each class so all 29
+    # classes appear in every split and test never overlaps train/val — the
+    # test number is a real generalisation estimate, not leaked training data.
+    n_test = max(1, int(n * TEST_FRACTION)) if n > 2 else 0
+    n_val = max(1, int(n * VAL_FRACTION)) if n > 2 else 0
+    test_samples.extend(items[:n_test])
+    val_samples.extend(items[n_test:n_test + n_val])
+    train_samples.extend(items[n_test + n_val:])
 rng.shuffle(train_samples)
 
 train_ds = ASLDataset(train_samples, transform=train_transform)
-val_ds = ASLDataset(val_samples, transform=val_transform)   # Bug fix: no augmentation on val
-print(f"Train: {len(train_ds)}, Val: {len(val_ds)}")
+val_ds = ASLDataset(val_samples, transform=val_transform)     # no augmentation on val
+test_ds = ASLDataset(test_samples, transform=val_transform)   # no augmentation on test
+print(f"Train: {len(train_ds)}, Val: {len(val_ds)}, Test: {len(test_ds)}")
 
 pin = DEVICE.type == "cuda"
 train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,
                           num_workers=4, pin_memory=pin, persistent_workers=True)
 val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False,
                         num_workers=4, pin_memory=pin, persistent_workers=True)
+test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False,
+                         num_workers=4, pin_memory=pin, persistent_workers=True)
 
 # ── Model ───────────────────────────────────────────────────────────────
 print("Loading MobileNetV2 (ImageNet pretrained)...")
@@ -196,6 +204,29 @@ for epoch in range(1, EPOCHS + 1):
 
 print(f"\nBest validation accuracy: {best_val_acc:.4f}")
 
+# ── Held-out TEST evaluation (best model, run exactly once) ──────────────
+# Unlike val (used to pick the checkpoint), the test set was seen neither during
+# training nor model selection, so this is an honest generalisation estimate.
+model.load_state_dict(torch.load(best_pth, weights_only=True))
+model.eval()
+test_correct = test_total = 0
+with torch.no_grad():
+    for images, labels in test_loader:
+        images = images.to(DEVICE, non_blocking=True)
+        labels = labels.to(DEVICE, non_blocking=True)
+        outputs = model(images)
+        test_correct += (outputs.argmax(1) == labels).sum().item()
+        test_total += images.size(0)
+test_acc = test_correct / test_total if test_total else 0.0
+print(f"Held-out TEST accuracy: {test_acc:.4f}  ({test_total} images)")
+os.makedirs("outputs/metrics", exist_ok=True)
+with open("outputs/metrics/test_accuracy.txt", "w") as _f:
+    _f.write(f"held_out_test_accuracy {test_acc:.4f}\n"
+             f"test_images {test_total}\n"
+             f"val_best {best_val_acc:.4f}\n"
+             f"split_train_val_test {1 - VAL_FRACTION - TEST_FRACTION:.2f}/"
+             f"{VAL_FRACTION:.2f}/{TEST_FRACTION:.2f}\n")
+
 # ── Export to ONNX ──────────────────────────────────────────────────────
 model.load_state_dict(torch.load(best_pth, weights_only=True))
 model.to("cpu").eval()   # Bug fix: model + dummy_input must be on the same device
@@ -207,7 +238,7 @@ torch.onnx.export(
     dummy_input,
     output_path,
     export_params=True,
-    opset_version=14,
+    opset_version=18,   # 18 is what the exporter falls back to anyway; set it explicitly
     input_names=["input"],
     output_names=["output"],
     dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},

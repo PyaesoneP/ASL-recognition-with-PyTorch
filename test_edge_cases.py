@@ -15,7 +15,7 @@ from PIL import Image
 
 from api.services.predictor import (
     SentenceBuilder, InferenceService,
-    CLASS_NAMES, NUM_CLASSES, IMG_SIZE,
+    CLASS_NAMES, NUM_CLASSES, IMG_SIZE, STABILITY_FRAMES,
     ImagePreprocessor, TemporalSmoother,
 )
 
@@ -248,6 +248,23 @@ for _ in range(4):
     idx, conf = smoother3.smooth(3, 0.5)
 check("TemporalSmoother: low confidence filtered", conf < 0.8 or True)
 
+# Regression (item 1): consensus must decide the class WITHOUT shrinking the
+# confidence CONFIDENCE_THRESHOLD gates on. The old code did
+# `smoothed_conf = top_conf * vote_count/len(votes)`, which punished agreement —
+# a real 0.9 on a 2/3 split collapsed to ~0.6 and starved the commit gate.
+smoother4 = TemporalSmoother(window_size=5, confidence_threshold=0.65)
+for _ in range(5):
+    idx, conf = smoother4.smooth(4, 0.9)
+check("TemporalSmoother: unanimous stream keeps full confidence",
+      idx == 4 and conf >= 0.9 - 1e-6)
+
+smoother5 = TemporalSmoother(window_size=3, confidence_threshold=0.65)
+smoother5.smooth(2, 0.88)      # winning class, frame 1
+smoother5.smooth(9, 0.40)      # transient distractor
+idx, conf = smoother5.smooth(2, 0.86)   # votes [2,9,2] -> winner is 2
+check("TemporalSmoother: split vote reports winner's real (unshrunk) confidence",
+      idx == 2 and conf >= 0.86)
+
 
 # ---------------------------------------------------------------------------
 # Edge Cases: InferenceService (no model loading)
@@ -260,7 +277,7 @@ check("InferenceService: default instantiation", service is not None)
 
 # Multiple independent sessions
 for i in range(5):
-    for _ in range(12):
+    for _ in range(STABILITY_FRAMES):
         service.update_sentence(f"session_{i}", "predict", "A")
 check("InferenceService: 5 independent sessions", all(
     service.get_sentence(f"session_{i}") == "A" for i in range(5)
@@ -273,7 +290,7 @@ check("InferenceService: other sessions unaffected", service.get_sentence("sessi
 # Different letters per session
 for i in range(3):
     letter = CLASS_NAMES[i]
-    for _ in range(12):
+    for _ in range(STABILITY_FRAMES):
         service.update_sentence(f"letter_session_{i}", "predict", letter)
 check("InferenceService: different letters per session",
       service.get_sentence("letter_session_0") == "A" and
